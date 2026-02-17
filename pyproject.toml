@@ -9,6 +9,7 @@ description = "Research simulation tool for O2/N2 transfer into PBS."
 requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.26",
+    "openpyxl>=3.1",
     "streamlit>=1.32",
 ]
 

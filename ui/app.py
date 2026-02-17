@@ -57,6 +57,31 @@ def _build_csv_text(time_s, c_o2, c_n2) -> str:
     return buffer.getvalue()
 
 
+def _build_excel_bytes(time_s, c_o2, c_n2) -> bytes:
+    """Build XLSX export bytes for timeseries output."""
+
+    df = pd.DataFrame(
+        {
+            "time_s": [float(v) for v in time_s],
+            "c_o2_mmol_l": [float(v) for v in c_o2],
+            "c_n2_mmol_l": [float(v) for v in c_n2],
+        }
+    )
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        df.to_excel(writer, sheet_name="timeseries", index=False)
+    return output.getvalue()
+
+
+def _build_source_vessel_excel_bytes(source_vessel_df: pd.DataFrame) -> bytes:
+    """Build XLSX export bytes for source-vessel DO trajectory."""
+
+    output = io.BytesIO()
+    with pd.ExcelWriter(output, engine="openpyxl") as writer:
+        source_vessel_df.to_excel(writer, sheet_name="source_vessel_do", index=False)
+    return output.getvalue()
+
+
 def _reference_concentrations_mmol_l(temperature_c: float) -> tuple[float, float]:
     """Reference concentrations at air/1atm for percentage-based inlet fields."""
     p_total_ref_kpa = 101.325
@@ -680,7 +705,8 @@ def main() -> None:
     st.caption("Source-vessel plot is adaptively downsampled for performance on long time windows.")
 
     st.markdown("### Export")
-    csv_text = _build_csv_text(outputs.time_s, outputs.c_o2_mmol_l, outputs.c_n2_mmol_l)
+    excel_bytes = _build_excel_bytes(outputs.time_s, outputs.c_o2_mmol_l, outputs.c_n2_mmol_l)
+    source_vessel_excel_bytes = _build_source_vessel_excel_bytes(source_vessel_df)
     metadata = {
         "inputs": asdict(inputs),
         "outputs_summary": {
@@ -699,14 +725,20 @@ def main() -> None:
     }
     metadata_json = json.dumps(metadata, indent=2, sort_keys=True)
 
-    c1, c2 = st.columns(2)
+    c1, c2, c3 = st.columns(3)
     c1.download_button(
-        "Download CSV",
-        data=csv_text,
-        file_name="carboxysim_timeseries.csv",
-        mime="text/csv",
+        "Download Timeseries Excel",
+        data=excel_bytes,
+        file_name="carboxysim_timeseries.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     )
     c2.download_button(
+        "Download Source Vessel Excel",
+        data=source_vessel_excel_bytes,
+        file_name="carboxysim_source_vessel_do.xlsx",
+        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    )
+    c3.download_button(
         "Download Metadata JSON",
         data=metadata_json,
         file_name="carboxysim_metadata.json",
