@@ -68,8 +68,17 @@ def _build_excel_bytes(time_s, c_o2, c_n2) -> bytes:
         }
     )
     output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        df.to_excel(writer, sheet_name="timeseries", index=False)
+    last_error: Exception | None = None
+    for engine in ("xlsxwriter", "openpyxl"):
+        try:
+            with pd.ExcelWriter(output, engine=engine) as writer:
+                df.to_excel(writer, sheet_name="timeseries", index=False)
+            return output.getvalue()
+        except ModuleNotFoundError as exc:
+            last_error = exc
+            output = io.BytesIO()
+    if last_error is not None:
+        raise RuntimeError("No Excel writer engine available (xlsxwriter/openpyxl).") from last_error
     return output.getvalue()
 
 
@@ -77,8 +86,17 @@ def _build_source_vessel_excel_bytes(source_vessel_df: pd.DataFrame) -> bytes:
     """Build XLSX export bytes for source-vessel DO trajectory."""
 
     output = io.BytesIO()
-    with pd.ExcelWriter(output, engine="openpyxl") as writer:
-        source_vessel_df.to_excel(writer, sheet_name="source_vessel_do", index=False)
+    last_error: Exception | None = None
+    for engine in ("xlsxwriter", "openpyxl"):
+        try:
+            with pd.ExcelWriter(output, engine=engine) as writer:
+                source_vessel_df.to_excel(writer, sheet_name="source_vessel_do", index=False)
+            return output.getvalue()
+        except ModuleNotFoundError as exc:
+            last_error = exc
+            output = io.BytesIO()
+    if last_error is not None:
+        raise RuntimeError("No Excel writer engine available (xlsxwriter/openpyxl).") from last_error
     return output.getvalue()
 
 
@@ -705,8 +723,16 @@ def main() -> None:
     st.caption("Source-vessel plot is adaptively downsampled for performance on long time windows.")
 
     st.markdown("### Export")
-    excel_bytes = _build_excel_bytes(outputs.time_s, outputs.c_o2_mmol_l, outputs.c_n2_mmol_l)
-    source_vessel_excel_bytes = _build_source_vessel_excel_bytes(source_vessel_df)
+    excel_available = True
+    excel_error = ""
+    try:
+        excel_bytes = _build_excel_bytes(outputs.time_s, outputs.c_o2_mmol_l, outputs.c_n2_mmol_l)
+        source_vessel_excel_bytes = _build_source_vessel_excel_bytes(source_vessel_df)
+    except RuntimeError as exc:
+        excel_available = False
+        excel_error = str(exc)
+        timeseries_csv = _build_csv_text(outputs.time_s, outputs.c_o2_mmol_l, outputs.c_n2_mmol_l)
+        source_vessel_csv = source_vessel_df.to_csv(index=False)
     metadata = {
         "inputs": asdict(inputs),
         "outputs_summary": {
@@ -726,24 +752,40 @@ def main() -> None:
     metadata_json = json.dumps(metadata, indent=2, sort_keys=True)
 
     c1, c2, c3 = st.columns(3)
-    c1.download_button(
-        "Download Timeseries Excel",
-        data=excel_bytes,
-        file_name="carboxysim_timeseries.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
-    c2.download_button(
-        "Download Source Vessel Excel",
-        data=source_vessel_excel_bytes,
-        file_name="carboxysim_source_vessel_do.xlsx",
-        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    )
+    if excel_available:
+        c1.download_button(
+            "Download Timeseries Excel",
+            data=excel_bytes,
+            file_name="carboxysim_timeseries.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        c2.download_button(
+            "Download Source Vessel Excel",
+            data=source_vessel_excel_bytes,
+            file_name="carboxysim_source_vessel_do.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    else:
+        c1.download_button(
+            "Download Timeseries CSV",
+            data=timeseries_csv,
+            file_name="carboxysim_timeseries.csv",
+            mime="text/csv",
+        )
+        c2.download_button(
+            "Download Source Vessel CSV",
+            data=source_vessel_csv,
+            file_name="carboxysim_source_vessel_do.csv",
+            mime="text/csv",
+        )
     c3.download_button(
         "Download Metadata JSON",
         data=metadata_json,
         file_name="carboxysim_metadata.json",
         mime="application/json",
     )
+    if not excel_available:
+        st.warning(f"Excel export unavailable in this environment: {excel_error}")
 
     st.markdown("### Flow Sweep")
     st.caption("Single-pass outlet concentration as a function of flow rate.")

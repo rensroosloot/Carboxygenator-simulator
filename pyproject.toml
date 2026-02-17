@@ -11,6 +11,7 @@ dependencies = [
     "numpy>=1.26",
     "openpyxl>=3.1",
     "streamlit>=1.32",
+    "xlsxwriter>=3.2",
 ]
 
 [tool.poetry]
