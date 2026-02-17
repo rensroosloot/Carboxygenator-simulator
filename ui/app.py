@@ -670,6 +670,29 @@ def main() -> None:
             step=1.0,
             help="Target DO% for the perfectly mixed source vessel recirculation estimate.",
         )
+        st.caption("Cell oxygen demand inputs")
+        total_cells = st.number_input(
+            "total_cells [-]",
+            min_value=0.0,
+            value=2.7e9,
+            step=1.0e8,
+            format="%.0f",
+            help="Total number of cells in the culture system.",
+        )
+        q_o2_cell_e17 = st.number_input(
+            "q_o2_cell [x1e-17 mol/cell/s]",
+            min_value=0.0,
+            value=5.0,
+            step=0.5,
+            help="Average cellular O2 uptake rate. 5 corresponds to 5e-17 mol/cell/s.",
+        )
+        o2_demand_margin = st.number_input(
+            "o2_demand_margin_factor [-]",
+            min_value=1.0,
+            value=1.0,
+            step=0.1,
+            help="Safety factor on cellular O2 demand (e.g. 1.2 for 20% margin).",
+        )
         c_o2_init_mmol_l = (c_o2_init_percent / 100.0) * c_o2_ref_mmol_l
         c_n2_init_mmol_l = (c_n2_init_percent / 100.0) * c_n2_ref_mmol_l
         tube_id_mm = st.number_input(
@@ -1143,6 +1166,25 @@ def main() -> None:
         "Sweep net O2 range [mmol/min]",
         f"{min(sweep_o2_net_values):.6f} to {max(sweep_o2_net_values):.6f}",
     )
+
+    q_o2_cell_mol_s = q_o2_cell_e17 * 1.0e-17
+    o2_demand_mmol_min = total_cells * q_o2_cell_mol_s * 60.0 * 1000.0 * o2_demand_margin
+    rec_row = sweep_df[sweep_df["o2_net_added_mmol_min"] >= o2_demand_mmol_min]
+    st.markdown("### Cell Demand -> Perfusion Recommendation")
+    r1, r2, r3 = st.columns(3)
+    r1.metric("Cell O2 demand [mmol/min]", f"{o2_demand_mmol_min:.6f}")
+    r2.metric("Current net O2 [mmol/min]", f"{o2_added_rate_mmol_min:.6f}")
+    if not rec_row.empty:
+        recommended_flow = float(rec_row.iloc[0]["flow_ml_min"])
+        r3.metric("Recommended perfusion [mL/min]", f"{recommended_flow:.2f}")
+        st.caption(
+            "Recommendation uses the first sweep flow where net O2 addition meets/exceeds cellular demand."
+        )
+    else:
+        r3.metric("Recommended perfusion [mL/min]", "Not in sweep range")
+        st.warning(
+            "Current sweep range cannot satisfy cellular O2 demand. Increase gas transfer/supply or extend flow_max."
+        )
 
     st.markdown("### Summary")
     col1, col2 = st.columns(2)
