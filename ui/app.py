@@ -6,6 +6,7 @@ import csv
 from collections import deque
 from dataclasses import replace
 from dataclasses import asdict
+from datetime import datetime, timezone
 import io
 import json
 
@@ -98,6 +99,261 @@ def _build_source_vessel_excel_bytes(source_vessel_df: pd.DataFrame) -> bytes:
     if last_error is not None:
         raise RuntimeError("No Excel writer engine available (xlsxwriter/openpyxl).") from last_error
     return output.getvalue()
+
+
+def _build_pdf_report_bytes(
+    inputs: SimulationInputs,
+    outputs,
+    pressure_context: dict,
+    do_ref_o2_mmol_l: float,
+    do_percent: np.ndarray,
+    o2_outlet_rate_mmol_min: float,
+    o2_added_rate_mmol_min: float,
+    source_vessel_df: pd.DataFrame,
+    sweep_df: pd.DataFrame,
+    target_source_do_percent: float,
+) -> bytes:
+    """Build a multi-page PDF report with settings, assumptions, and all key datasets."""
+
+    try:
+        from reportlab.lib import colors
+        from reportlab.lib.pagesizes import A4
+        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
+    except ModuleNotFoundError as exc:
+        raise RuntimeError("PDF export unavailable: missing 'reportlab'.") from exc
+
+    buffer = io.BytesIO()
+    doc = SimpleDocTemplate(
+        buffer,
+        pagesize=A4,
+        leftMargin=24,
+        rightMargin=24,
+        topMargin=24,
+        bottomMargin=24,
+    )
+    styles = getSampleStyleSheet()
+    story = []
+
+    story.append(Paragraph("CarboxySim Report", styles["Title"]))
+    story.append(
+        Paragraph(
+            f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
+            styles["Normal"],
+        )
+    )
+    story.append(Spacer(1, 8))
+    story.append(
+        Paragraph(
+            "Model assumptions: single-pass tubing transfer, constant gas composition/pressure/temperature, no PBS reactions.",
+            styles["Normal"],
+        )
+    )
+    story.append(Spacer(1, 10))
+
+    story.append(Paragraph("Input Settings (Detailed)", styles["Heading2"]))
+    setting_explanations = {
+        "O2 gas fraction y_o2 [-]": "Fraction of oxygen in gas phase. N2 is set as 1 - y_o2.",
+        "N2 gas fraction y_n2 [-]": "Fraction of nitrogen in gas phase.",
+        "Total gas pressure p_total_kpa [kPa]": "Absolute gas pressure used with Henry-law equilibrium.",
+        "Temperature [C]": "Liquid temperature for solubility reference.",
+        "Source vessel volume [L]": "Well-mixed vessel volume for recirculation estimate.",
+        "Perfusion speed flow_ml_min [mL/min]": "Liquid flow through tubing.",
+        "Total hold-up volume [mL]": "Total loop liquid volume to measurement point; sets transport delay.",
+        "Tube ID [mm]": "Inner diameter of exchange tubing.",
+        "Tube OD [mm]": "Outer diameter of exchange tubing.",
+        "Shell ID [mm]": "Inner diameter of surrounding shell for annulus gas volume.",
+        "Tube length [cm]": "Effective exchange length.",
+        "Gas flow [mL/min]": "Total gas flow available for O2/N2 supply.",
+        "Transfer model": "kLa uses direct transfer coefficients; permeability derives effective transfer.",
+        "kLa O2 [1/s]": "First-order transfer rate to O2 equilibrium (kLa mode).",
+        "kLa N2 [1/s]": "First-order transfer rate to N2 equilibrium (kLa mode).",
+        "Permeability O2 [mmol*m/(m2*s*kPa)]": "Wall permeability coefficient for O2 (permeability mode).",
+        "Permeability N2 [mmol*m/(m2*s*kPa)]": "Wall permeability coefficient for N2 (permeability mode).",
+        "Gas-liquid model": "Lumped uses one gas composition; segmented updates depletion along length.",
+        "n_segments [-]": "Number of axial segments in segmented mode.",
+        "Inlet DO2 [%]": "Starting dissolved oxygen in incoming liquid, relative to air/1atm reference.",
+        "Inlet N2 [%]": "Starting dissolved nitrogen relative to air/1atm reference.",
+        "Target source DO2 [%]": "Target DO in source vessel for time-to-target estimate.",
+        "Simulation horizon [min]": "Output time window.",
+        "Time step [min]": "Output sampling interval.",
+    }
+    settings_rows = [
+        ["Setting", "Value", "Explanation"],
+        ["O2 gas fraction y_o2 [-]", f"{inputs.y_o2:.6f}", setting_explanations["O2 gas fraction y_o2 [-]"]],
+        ["N2 gas fraction y_n2 [-]", f"{inputs.y_n2:.6f}", setting_explanations["N2 gas fraction y_n2 [-]"]],
+        ["Total gas pressure p_total_kpa [kPa]", f"{inputs.p_total_kpa:.3f}", setting_explanations["Total gas pressure p_total_kpa [kPa]"]],
+        ["Temperature [C]", f"{inputs.temperature_c:.2f}", setting_explanations["Temperature [C]"]],
+        ["Source vessel volume [L]", f"{inputs.volume_l:.3f}", setting_explanations["Source vessel volume [L]"]],
+        ["Perfusion speed flow_ml_min [mL/min]", f"{inputs.flow_ml_min:.3f}", setting_explanations["Perfusion speed flow_ml_min [mL/min]"]],
+        ["Total hold-up volume [mL]", f"{float(outputs.metadata.get('transport_volume_ml', 0.0)):.3f}", setting_explanations["Total hold-up volume [mL]"]],
+        ["Tube ID [mm]", f"{inputs.tube_id_mm:.3f}", setting_explanations["Tube ID [mm]"]],
+        ["Tube OD [mm]", f"{inputs.tube_od_mm:.3f}", setting_explanations["Tube OD [mm]"]],
+        ["Shell ID [mm]", f"{inputs.shell_id_mm:.3f}", setting_explanations["Shell ID [mm]"]],
+        ["Tube length [cm]", f"{inputs.tube_length_cm:.2f}", setting_explanations["Tube length [cm]"]],
+        ["Gas flow [mL/min]", f"{inputs.gas_flow_ml_min:.3f}", setting_explanations["Gas flow [mL/min]"]],
+        ["Transfer model", str(inputs.transfer_model), setting_explanations["Transfer model"]],
+        ["kLa O2 [1/s]", f"{inputs.kla_o2_s_inv:.6g}", setting_explanations["kLa O2 [1/s]"]],
+        ["kLa N2 [1/s]", f"{inputs.kla_n2_s_inv:.6g}", setting_explanations["kLa N2 [1/s]"]],
+        [
+            "Permeability O2 [mmol*m/(m2*s*kPa)]",
+            "n/a" if inputs.perm_o2_mmol_m_per_m2_s_kpa is None else f"{inputs.perm_o2_mmol_m_per_m2_s_kpa:.3e}",
+            setting_explanations["Permeability O2 [mmol*m/(m2*s*kPa)]"],
+        ],
+        [
+            "Permeability N2 [mmol*m/(m2*s*kPa)]",
+            "n/a" if inputs.perm_n2_mmol_m_per_m2_s_kpa is None else f"{inputs.perm_n2_mmol_m_per_m2_s_kpa:.3e}",
+            setting_explanations["Permeability N2 [mmol*m/(m2*s*kPa)]"],
+        ],
+        ["Gas-liquid model", str(inputs.gas_liquid_model), setting_explanations["Gas-liquid model"]],
+        ["n_segments [-]", f"{int(inputs.n_segments)}", setting_explanations["n_segments [-]"]],
+        ["Inlet DO2 [%]", f"{(inputs.c_o2_init_mmol_l / max(do_ref_o2_mmol_l, 1e-15)) * 100.0:.3f}", setting_explanations["Inlet DO2 [%]"]],
+        [
+            "Inlet N2 [%]",
+            f"{(inputs.c_n2_init_mmol_l / max(constant_solubility_model('N2', inputs.temperature_c) * 0.79 * 101.325, 1e-15)) * 100.0:.3f}",
+            setting_explanations["Inlet N2 [%]"],
+        ],
+        ["Target source DO2 [%]", f"{target_source_do_percent:.3f}", setting_explanations["Target source DO2 [%]"]],
+        ["Simulation horizon [min]", f"{inputs.t_end_s / 60.0:.3f}", setting_explanations["Simulation horizon [min]"]],
+        ["Time step [min]", f"{inputs.dt_s / 60.0:.5f}", setting_explanations["Time step [min]"]],
+    ]
+    settings_table = Table(settings_rows, repeatRows=1, colWidths=[170, 90, 270])
+    settings_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+                ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                ("FONTSIZE", (0, 0), (-1, -1), 7),
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+            ]
+        )
+    )
+    story.append(settings_table)
+    story.append(Spacer(1, 10))
+
+    story.append(Paragraph("Run Summary", styles["Heading2"]))
+    summary_rows = [
+        ["Metric", "Value"],
+        ["Final DO2 [%]", f"{float(do_percent[-1]):.3f}"],
+        ["Final c_o2 [mmol/L]", f"{float(outputs.c_o2_mmol_l[-1]):.6f}"],
+        ["Final c_n2 [mmol/L]", f"{float(outputs.c_n2_mmol_l[-1]):.6f}"],
+        ["Pressure model", str(pressure_context.get("pressure_mode", "Manual"))],
+        ["Delta p [mbar]", f"{float(pressure_context.get('delta_p_mbar', 0.0)):.3f}"],
+        ["Transfer residence time [min]", f"{float(outputs.metadata['residence_time_s']) / 60.0:.3f}"],
+        ["Transport delay [min]", f"{float(outputs.metadata.get('transport_delay_s', 0.0)) / 60.0:.3f}"],
+        ["O2 outflow [mmol/min]", f"{o2_outlet_rate_mmol_min:.6f}"],
+        ["Net O2 added [mmol/min]", f"{o2_added_rate_mmol_min:.6f}"],
+    ]
+    summary_table = Table(summary_rows, repeatRows=1, colWidths=[220, 140])
+    summary_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+                ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                ("FONTSIZE", (0, 0), (-1, -1), 8),
+            ]
+        )
+    )
+    story.append(summary_table)
+    story.append(PageBreak())
+
+    story.append(Paragraph("Timeseries Data (All Rows)", styles["Heading2"]))
+    timeseries_df = pd.DataFrame(
+        {
+            "time_s": outputs.time_s,
+            "time_min": outputs.time_s / 60.0,
+            "c_o2_mmol_l": outputs.c_o2_mmol_l,
+            "c_n2_mmol_l": outputs.c_n2_mmol_l,
+            "do2_percent": do_percent,
+        }
+    )
+    ts_rows = [["time_s", "time_min", "c_o2_mmol_l", "c_n2_mmol_l", "do2_percent"]]
+    for row in timeseries_df.itertuples(index=False):
+        ts_rows.append(
+            [
+                f"{float(row.time_s):.3f}",
+                f"{float(row.time_min):.5f}",
+                f"{float(row.c_o2_mmol_l):.8f}",
+                f"{float(row.c_n2_mmol_l):.8f}",
+                f"{float(row.do2_percent):.5f}",
+            ]
+        )
+    ts_table = Table(ts_rows, repeatRows=1, colWidths=[90, 90, 110, 110, 100])
+    ts_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+                ("GRID", (0, 0), (-1, -1), 0.2, colors.grey),
+                ("FONTSIZE", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+    story.append(ts_table)
+    story.append(PageBreak())
+
+    story.append(Paragraph("Source Vessel DO Trajectory (All Rows)", styles["Heading2"]))
+    sv_rows = [["time_s", "time_min", "source_do2_percent"]]
+    for row in source_vessel_df.itertuples(index=False):
+        sv_rows.append(
+            [
+                f"{float(row.time_s):.3f}",
+                f"{float(row.time_min):.5f}",
+                f"{float(row.source_do2_percent):.6f}",
+            ]
+        )
+    sv_table = Table(sv_rows, repeatRows=1, colWidths=[120, 120, 160])
+    sv_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+                ("GRID", (0, 0), (-1, -1), 0.2, colors.grey),
+                ("FONTSIZE", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+    story.append(sv_table)
+    story.append(PageBreak())
+
+    story.append(Paragraph("Flow Sweep Data (All Rows)", styles["Heading2"]))
+    sw_rows = [
+        [
+            "flow_ml_min",
+            "do_o2_out_percent",
+            "c_o2_out_mmol_l",
+            "c_n2_out_mmol_l",
+            "o2_outflow_mmol_min",
+            "o2_net_added_mmol_min",
+            "delta_p_mbar",
+            "p_total_kpa",
+        ]
+    ]
+    for row in sweep_df.itertuples(index=False):
+        sw_rows.append(
+            [
+                f"{float(row.flow_ml_min):.5f}",
+                f"{float(row.do_o2_out_percent):.6f}",
+                f"{float(row.c_o2_out_mmol_l):.8f}",
+                f"{float(row.c_n2_out_mmol_l):.8f}",
+                f"{float(row.o2_outflow_mmol_min):.8f}",
+                f"{float(row.o2_net_added_mmol_min):.8f}",
+                f"{float(row.delta_p_mbar):.5f}",
+                f"{float(row.p_total_kpa):.5f}",
+            ]
+        )
+    sw_table = Table(sw_rows, repeatRows=1, colWidths=[65, 70, 75, 75, 75, 75, 65, 65])
+    sw_table.setStyle(
+        TableStyle(
+            [
+                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
+                ("GRID", (0, 0), (-1, -1), 0.2, colors.grey),
+                ("FONTSIZE", (0, 0), (-1, -1), 6),
+            ]
+        )
+    )
+    story.append(sw_table)
+
+    doc.build(story)
+    return buffer.getvalue()
 
 
 def _reference_concentrations_mmol_l(temperature_c: float) -> tuple[float, float]:
@@ -722,71 +978,6 @@ def main() -> None:
     st.altair_chart(source_chart, use_container_width=True)
     st.caption("Source-vessel plot is adaptively downsampled for performance on long time windows.")
 
-    st.markdown("### Export")
-    excel_available = True
-    excel_error = ""
-    try:
-        excel_bytes = _build_excel_bytes(outputs.time_s, outputs.c_o2_mmol_l, outputs.c_n2_mmol_l)
-        source_vessel_excel_bytes = _build_source_vessel_excel_bytes(source_vessel_df)
-    except RuntimeError as exc:
-        excel_available = False
-        excel_error = str(exc)
-        timeseries_csv = _build_csv_text(outputs.time_s, outputs.c_o2_mmol_l, outputs.c_n2_mmol_l)
-        source_vessel_csv = source_vessel_df.to_csv(index=False)
-    metadata = {
-        "inputs": asdict(inputs),
-        "outputs_summary": {
-            "n_steps": int(len(outputs.time_s)),
-            "cstar_o2_mmol_l": float(outputs.cstar_o2_mmol_l),
-            "cstar_n2_mmol_l": float(outputs.cstar_n2_mmol_l),
-            "final_c_o2_mmol_l": float(outputs.c_o2_mmol_l[-1]),
-            "final_c_n2_mmol_l": float(outputs.c_n2_mmol_l[-1]),
-            "do_reference_o2_mmol_l": float(do_ref_o2_mmol_l),
-            "final_do_o2_percent": float(do_percent[-1]),
-            "o2_outflow_mmol_min": float(o2_outlet_rate_mmol_min),
-            "o2_net_added_mmol_min": float(o2_added_rate_mmol_min),
-        },
-        "pressure_context": pressure_context,
-        "metadata": outputs.metadata,
-    }
-    metadata_json = json.dumps(metadata, indent=2, sort_keys=True)
-
-    c1, c2, c3 = st.columns(3)
-    if excel_available:
-        c1.download_button(
-            "Download Timeseries Excel",
-            data=excel_bytes,
-            file_name="carboxysim_timeseries.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-        c2.download_button(
-            "Download Source Vessel Excel",
-            data=source_vessel_excel_bytes,
-            file_name="carboxysim_source_vessel_do.xlsx",
-            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        )
-    else:
-        c1.download_button(
-            "Download Timeseries CSV",
-            data=timeseries_csv,
-            file_name="carboxysim_timeseries.csv",
-            mime="text/csv",
-        )
-        c2.download_button(
-            "Download Source Vessel CSV",
-            data=source_vessel_csv,
-            file_name="carboxysim_source_vessel_do.csv",
-            mime="text/csv",
-        )
-    c3.download_button(
-        "Download Metadata JSON",
-        data=metadata_json,
-        file_name="carboxysim_metadata.json",
-        mime="application/json",
-    )
-    if not excel_available:
-        st.warning(f"Excel export unavailable in this environment: {excel_error}")
-
     st.markdown("### Flow Sweep")
     st.caption("Single-pass outlet concentration as a function of flow rate.")
     fcol1, fcol2, fcol3 = st.columns(3)
@@ -890,6 +1081,102 @@ def main() -> None:
     col2.metric("O2 transfer limited", "Yes" if bool(outputs.metadata["o2_transfer_limited"]) else "No")
     col1.metric("O2 outflow [mmol/min]", f"{o2_outlet_rate_mmol_min:.6f}")
     col2.metric("Net O2 added [mmol/min]", f"{o2_added_rate_mmol_min:.6f}")
+
+    st.markdown("### Export")
+    excel_available = True
+    excel_error = ""
+    try:
+        excel_bytes = _build_excel_bytes(outputs.time_s, outputs.c_o2_mmol_l, outputs.c_n2_mmol_l)
+        source_vessel_excel_bytes = _build_source_vessel_excel_bytes(source_vessel_df)
+    except RuntimeError as exc:
+        excel_available = False
+        excel_error = str(exc)
+        timeseries_csv = _build_csv_text(outputs.time_s, outputs.c_o2_mmol_l, outputs.c_n2_mmol_l)
+        source_vessel_csv = source_vessel_df.to_csv(index=False)
+
+    pdf_available = True
+    pdf_error = ""
+    try:
+        pdf_bytes = _build_pdf_report_bytes(
+            inputs=inputs,
+            outputs=outputs,
+            pressure_context=pressure_context,
+            do_ref_o2_mmol_l=do_ref_o2_mmol_l,
+            do_percent=do_percent,
+            o2_outlet_rate_mmol_min=o2_outlet_rate_mmol_min,
+            o2_added_rate_mmol_min=o2_added_rate_mmol_min,
+            source_vessel_df=source_vessel_df,
+            sweep_df=sweep_df,
+            target_source_do_percent=target_source_do_percent,
+        )
+    except RuntimeError as exc:
+        pdf_available = False
+        pdf_error = str(exc)
+
+    metadata = {
+        "inputs": asdict(inputs),
+        "outputs_summary": {
+            "n_steps": int(len(outputs.time_s)),
+            "cstar_o2_mmol_l": float(outputs.cstar_o2_mmol_l),
+            "cstar_n2_mmol_l": float(outputs.cstar_n2_mmol_l),
+            "final_c_o2_mmol_l": float(outputs.c_o2_mmol_l[-1]),
+            "final_c_n2_mmol_l": float(outputs.c_n2_mmol_l[-1]),
+            "do_reference_o2_mmol_l": float(do_ref_o2_mmol_l),
+            "final_do_o2_percent": float(do_percent[-1]),
+            "o2_outflow_mmol_min": float(o2_outlet_rate_mmol_min),
+            "o2_net_added_mmol_min": float(o2_added_rate_mmol_min),
+        },
+        "pressure_context": pressure_context,
+        "source_vessel_timeseries": source_vessel_df.to_dict(orient="records"),
+        "flow_sweep": sweep_df.to_dict(orient="records"),
+        "metadata": outputs.metadata,
+    }
+    metadata_json = json.dumps(metadata, indent=2, sort_keys=True)
+
+    c1, c2, c3, c4 = st.columns(4)
+    if excel_available:
+        c1.download_button(
+            "Timeseries Excel",
+            data=excel_bytes,
+            file_name="carboxysim_timeseries.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+        c2.download_button(
+            "Source Vessel Excel",
+            data=source_vessel_excel_bytes,
+            file_name="carboxysim_source_vessel_do.xlsx",
+            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        )
+    else:
+        c1.download_button(
+            "Timeseries CSV",
+            data=timeseries_csv,
+            file_name="carboxysim_timeseries.csv",
+            mime="text/csv",
+        )
+        c2.download_button(
+            "Source Vessel CSV",
+            data=source_vessel_csv,
+            file_name="carboxysim_source_vessel_do.csv",
+            mime="text/csv",
+        )
+    if pdf_available:
+        c3.download_button(
+            "PDF Report",
+            data=pdf_bytes,
+            file_name="carboxysim_report.pdf",
+            mime="application/pdf",
+        )
+    c4.download_button(
+        "Metadata JSON",
+        data=metadata_json,
+        file_name="carboxysim_metadata.json",
+        mime="application/json",
+    )
+    if not excel_available:
+        st.warning(f"Excel export unavailable in this environment: {excel_error}")
+    if not pdf_available:
+        st.warning(f"PDF export unavailable in this environment: {pdf_error}")
 
 
 if __name__ == "__main__":

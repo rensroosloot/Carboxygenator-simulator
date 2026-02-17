@@ -10,6 +10,7 @@ requires-python = ">=3.10"
 dependencies = [
     "numpy>=1.26",
     "openpyxl>=3.1",
+    "reportlab>=4.2",
     "streamlit>=1.32",
     "xlsxwriter>=3.2",
 ]
