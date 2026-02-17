@@ -117,10 +117,11 @@ def _build_pdf_report_bytes(
 
     try:
         from reportlab.lib import colors
+        from reportlab.lib.enums import TA_LEFT
         from reportlab.lib.pagesizes import A4
-        from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.lib.styles import ParagraphStyle, getSampleStyleSheet
         from reportlab.graphics.charts.lineplots import LinePlot
-        from reportlab.graphics.shapes import Drawing, String
+        from reportlab.graphics.shapes import Drawing, Rect, String
         from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
     except ModuleNotFoundError as exc:
         raise RuntimeError("PDF export unavailable: missing 'reportlab'.") from exc
@@ -135,6 +136,35 @@ def _build_pdf_report_bytes(
         bottomMargin=24,
     )
     styles = getSampleStyleSheet()
+    c_bg = colors.HexColor("#0b1220")
+    c_card = colors.HexColor("#121a2b")
+    c_header = colors.HexColor("#1f2a44")
+    c_text = colors.HexColor("#e6edf3")
+    c_muted = colors.HexColor("#9fb0c3")
+    c_accent = colors.HexColor("#5bc0ff")
+    c_grid = colors.HexColor("#2c3b5c")
+
+    style_title = ParagraphStyle(
+        "PdfTitle",
+        parent=styles["Title"],
+        textColor=c_text,
+        fontSize=22,
+        alignment=TA_LEFT,
+    )
+    style_h2 = ParagraphStyle(
+        "PdfH2",
+        parent=styles["Heading2"],
+        textColor=c_text,
+        fontSize=14,
+        spaceAfter=6,
+    )
+    style_body = ParagraphStyle(
+        "PdfBody",
+        parent=styles["Normal"],
+        textColor=c_muted,
+        fontSize=9,
+        leading=12,
+    )
     story = []
 
     def _downsample_xy(x_vals: list[float], y_vals: list[float], max_points: int = 300) -> list[tuple[float, float]]:
@@ -163,9 +193,10 @@ def _build_pdf_report_bytes(
             y_max = y_min + 1.0
 
         drawing = Drawing(540, 240)
-        drawing.add(String(270, 225, title, textAnchor="middle", fontSize=11))
-        drawing.add(String(270, 12, x_label, textAnchor="middle", fontSize=8))
-        drawing.add(String(10, 120, y_label, fontSize=8, angle=90))
+        drawing.add(Rect(0, 0, 540, 240, fillColor=c_card, strokeColor=c_grid, strokeWidth=0.6))
+        drawing.add(String(270, 225, title, textAnchor="middle", fontSize=11, fillColor=c_text))
+        drawing.add(String(270, 12, x_label, textAnchor="middle", fontSize=8, fillColor=c_muted))
+        drawing.add(String(12, 120, y_label, fontSize=8, angle=90, fillColor=c_muted))
 
         plot = LinePlot()
         plot.x = 50
@@ -173,33 +204,39 @@ def _build_pdf_report_bytes(
         plot.width = 470
         plot.height = 165
         plot.data = [points]
-        plot.lines[0].strokeColor = colors.HexColor("#1f77b4")
-        plot.lines[0].strokeWidth = 1.2
+        plot.lines[0].strokeColor = c_accent
+        plot.lines[0].strokeWidth = 1.8
         plot.xValueAxis.valueMin = x_min
         plot.xValueAxis.valueMax = x_max
         plot.yValueAxis.valueMin = y_min
         plot.yValueAxis.valueMax = y_max
         plot.xValueAxis.valueStep = (x_max - x_min) / 5.0
         plot.yValueAxis.valueStep = (y_max - y_min) / 5.0
+        plot.xValueAxis.strokeColor = c_grid
+        plot.yValueAxis.strokeColor = c_grid
+        plot.xValueAxis.labels.fillColor = c_muted
+        plot.yValueAxis.labels.fillColor = c_muted
+        plot.xValueAxis.labels.fontSize = 7
+        plot.yValueAxis.labels.fontSize = 7
         drawing.add(plot)
         return drawing
 
-    story.append(Paragraph("CarboxySim Report", styles["Title"]))
+    story.append(Paragraph("CarboxySim Report", style_title))
     story.append(
         Paragraph(
             f"Generated: {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M:%S UTC')}",
-            styles["Normal"],
+            style_body,
         )
     )
     story.append(Spacer(1, 8))
     story.append(
         Paragraph(
             "Model assumptions: single-pass tubing transfer, constant gas composition/pressure/temperature, no PBS reactions.",
-            styles["Normal"],
+            style_body,
         )
     )
     story.append(Spacer(1, 10))
-    story.append(Paragraph("Key Graphs", styles["Heading2"]))
+    story.append(Paragraph("Key Graphs", style_h2))
     story.append(
         _line_plot_drawing(
             title="Source Vessel DO2 vs Time",
@@ -231,7 +268,7 @@ def _build_pdf_report_bytes(
     )
     story.append(PageBreak())
 
-    story.append(Paragraph("Input Settings (Detailed)", styles["Heading2"]))
+    story.append(Paragraph("Input Settings (Detailed)", style_h2))
     setting_explanations = {
         "O2 gas fraction y_o2 [-]": "Fraction of oxygen in gas phase. N2 is set as 1 - y_o2.",
         "N2 gas fraction y_n2 [-]": "Fraction of nitrogen in gas phase.",
@@ -301,8 +338,10 @@ def _build_pdf_report_bytes(
     settings_table.setStyle(
         TableStyle(
             [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-                ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                ("BACKGROUND", (0, 0), (-1, 0), c_header),
+                ("BACKGROUND", (0, 1), (-1, -1), c_card),
+                ("TEXTCOLOR", (0, 0), (-1, -1), c_text),
+                ("GRID", (0, 0), (-1, -1), 0.25, c_grid),
                 ("FONTSIZE", (0, 0), (-1, -1), 7),
                 ("VALIGN", (0, 0), (-1, -1), "TOP"),
             ]
@@ -311,7 +350,7 @@ def _build_pdf_report_bytes(
     story.append(settings_table)
     story.append(Spacer(1, 10))
 
-    story.append(Paragraph("Run Summary", styles["Heading2"]))
+    story.append(Paragraph("Run Summary", style_h2))
     summary_rows = [
         ["Metric", "Value"],
         ["Final DO2 [%]", f"{float(do_percent[-1]):.3f}"],
@@ -328,8 +367,10 @@ def _build_pdf_report_bytes(
     summary_table.setStyle(
         TableStyle(
             [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-                ("GRID", (0, 0), (-1, -1), 0.25, colors.grey),
+                ("BACKGROUND", (0, 0), (-1, 0), c_header),
+                ("BACKGROUND", (0, 1), (-1, -1), c_card),
+                ("TEXTCOLOR", (0, 0), (-1, -1), c_text),
+                ("GRID", (0, 0), (-1, -1), 0.25, c_grid),
                 ("FONTSIZE", (0, 0), (-1, -1), 8),
             ]
         )
@@ -337,7 +378,7 @@ def _build_pdf_report_bytes(
     story.append(summary_table)
     story.append(PageBreak())
 
-    story.append(Paragraph("Timeseries Data (All Rows)", styles["Heading2"]))
+    story.append(Paragraph("Timeseries Data (All Rows)", style_h2))
     timeseries_df = pd.DataFrame(
         {
             "time_s": outputs.time_s,
@@ -362,8 +403,10 @@ def _build_pdf_report_bytes(
     ts_table.setStyle(
         TableStyle(
             [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-                ("GRID", (0, 0), (-1, -1), 0.2, colors.grey),
+                ("BACKGROUND", (0, 0), (-1, 0), c_header),
+                ("BACKGROUND", (0, 1), (-1, -1), c_card),
+                ("TEXTCOLOR", (0, 0), (-1, -1), c_text),
+                ("GRID", (0, 0), (-1, -1), 0.2, c_grid),
                 ("FONTSIZE", (0, 0), (-1, -1), 6),
             ]
         )
@@ -371,7 +414,7 @@ def _build_pdf_report_bytes(
     story.append(ts_table)
     story.append(PageBreak())
 
-    story.append(Paragraph("Source Vessel DO Trajectory (All Rows)", styles["Heading2"]))
+    story.append(Paragraph("Source Vessel DO Trajectory (All Rows)", style_h2))
     sv_rows = [["time_s", "time_min", "source_do2_percent"]]
     for row in source_vessel_df.itertuples(index=False):
         sv_rows.append(
@@ -385,8 +428,10 @@ def _build_pdf_report_bytes(
     sv_table.setStyle(
         TableStyle(
             [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-                ("GRID", (0, 0), (-1, -1), 0.2, colors.grey),
+                ("BACKGROUND", (0, 0), (-1, 0), c_header),
+                ("BACKGROUND", (0, 1), (-1, -1), c_card),
+                ("TEXTCOLOR", (0, 0), (-1, -1), c_text),
+                ("GRID", (0, 0), (-1, -1), 0.2, c_grid),
                 ("FONTSIZE", (0, 0), (-1, -1), 6),
             ]
         )
@@ -394,7 +439,7 @@ def _build_pdf_report_bytes(
     story.append(sv_table)
     story.append(PageBreak())
 
-    story.append(Paragraph("Flow Sweep Data (All Rows)", styles["Heading2"]))
+    story.append(Paragraph("Flow Sweep Data (All Rows)", style_h2))
     sw_rows = [
         [
             "flow_ml_min",
@@ -424,15 +469,26 @@ def _build_pdf_report_bytes(
     sw_table.setStyle(
         TableStyle(
             [
-                ("BACKGROUND", (0, 0), (-1, 0), colors.lightgrey),
-                ("GRID", (0, 0), (-1, -1), 0.2, colors.grey),
+                ("BACKGROUND", (0, 0), (-1, 0), c_header),
+                ("BACKGROUND", (0, 1), (-1, -1), c_card),
+                ("TEXTCOLOR", (0, 0), (-1, -1), c_text),
+                ("GRID", (0, 0), (-1, -1), 0.2, c_grid),
                 ("FONTSIZE", (0, 0), (-1, -1), 6),
             ]
         )
     )
     story.append(sw_table)
 
-    doc.build(story)
+    def _draw_page(canvas, doc_) -> None:
+        canvas.saveState()
+        canvas.setFillColor(c_bg)
+        canvas.rect(0, 0, A4[0], A4[1], stroke=0, fill=1)
+        canvas.setFillColor(c_muted)
+        canvas.setFont("Helvetica", 7)
+        canvas.drawRightString(A4[0] - 20, 12, f"Page {doc_.page}")
+        canvas.restoreState()
+
+    doc.build(story, onFirstPage=_draw_page, onLaterPages=_draw_page)
     return buffer.getvalue()
 
 
