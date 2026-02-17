@@ -1,0 +1,16 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "carboxysim"
+version = "0.1.0"
+description = "Research simulation tool for O2/N2 transfer into PBS."
+requires-python = ">=3.10"
+dependencies = [
+    "numpy>=1.26",
+    "streamlit>=1.32",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

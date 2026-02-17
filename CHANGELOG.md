@@ -1,0 +1,105 @@
+# Changelog
+
+All meaningful changes to this project are tracked here.
+
+## [Unreleased]
+- Date: `2026-02-16`
+- Summary: Initialized GAMP5 validation scaffolding and documentation governance.
+- Reason/Impact: Establishes traceable development and validation workflow before implementation.
+- Evidence: `docs/validation/ValidationPlan.md`, `docs/validation/RiskAssessment.md`, `docs/validation/RTM.md`, `docs/validation/TestProtocol.md`, `docs/validation/TestReport.md`, `AGENTS.md`
+- Date: `2026-02-16`
+- Summary: Added Phase B project skeleton and first core validation module.
+- Reason/Impact: Introduces initial implementation (`SimulationInputs`, `validate_inputs`) and executable tests for input rules.
+- Evidence: `core/params.py`, `core/__init__.py`, `tests/test_params.py`, `ui/app.py`, `pyproject.toml`
+- Date: `2026-02-16`
+- Summary: Recorded initial executed validation evidence.
+- Reason/Impact: Keeps GAMP5 traceability current for implemented validation tests.
+- Evidence: `docs/validation/RTM.md`, `docs/validation/TestReport.md`
+- Date: `2026-02-16`
+- Summary: Implemented core equilibrium and time-domain solver functions with AC-001..AC-006 test coverage.
+- Reason/Impact: Adds first physics simulation capability and verifies deterministic, stable behavior against FS acceptance criteria.
+- Evidence: `core/model.py`, `core/solver.py`, `core/results.py`, `core/__init__.py`, `tests/test_solver.py`, `docs/validation/RTM.md`, `docs/validation/TestReport.md`
+- Date: `2026-02-16`
+- Summary: Implemented export helpers and executed AC-007 export integrity test.
+- Reason/Impact: Completes MVP core function contracts for file export and closes UR-008 traceability gap.
+- Evidence: `core/results.py`, `core/__init__.py`, `tests/test_exports.py`, `docs/validation/RTM.md`, `docs/validation/TestReport.md`
+- Date: `2026-02-16`
+- Summary: Implemented working Streamlit UI for input-run-plot-export flow.
+- Reason/Impact: Enables researchers to run the simulation interactively and download results without writing code.
+- Evidence: `ui/app.py`, `pyproject.toml`
+- Date: `2026-02-16`
+- Summary: Migrated model to single-pass tubing residence-time transfer and added flow/tubing inputs.
+- Reason/Impact: Aligns the simulator with source-to-waste measurement after carboxygenator tubing and supports flow-dependent transfer behavior.
+- Evidence: `core/params.py`, `core/model.py`, `core/solver.py`, `core/results.py`, `core/__init__.py`, `ui/app.py`, `tests/test_params.py`, `tests/test_solver.py`, `tests/test_exports.py`, `docs/URS.md`, `docs/DS.md`, `docs/FS.md`, `docs/validation/RTM.md`, `docs/validation/TestProtocol.md`, `docs/validation/TestReport.md`
+- Date: `2026-02-16`
+- Summary: Added flow sweep visualization to Streamlit UI.
+- Reason/Impact: Enables rapid sensitivity analysis of outlet O2/N2 concentration versus flow rate without repeated manual runs.
+- Evidence: `ui/app.py`
+- Date: `2026-02-16`
+- Summary: Updated UI to show DO% as primary output using air@1atm reference.
+- Reason/Impact: Aligns visualization with how the experimental setup reports oxygenation (`DO%`), while retaining concentration outputs as secondary context.
+- Evidence: `ui/app.py`
+- Date: `2026-02-16`
+- Summary: Updated gas composition input to percentage mode with automatic 100% total constraint.
+- Reason/Impact: Reduces user input errors and matches operational thinking in percent gas blends.
+- Evidence: `ui/app.py`
+- Date: `2026-02-16`
+- Summary: Changed initial dissolved O2/N2 UI inputs from mmol/L to percentage-based fields.
+- Reason/Impact: Aligns initialization with DO-style operation while preserving internal mmol/L simulation calculations.
+- Evidence: `ui/app.py`
+- Date: `2026-02-16`
+- Summary: Added permeability-based transfer mode as alternative to kLa mode.
+- Reason/Impact: Enables simulation using tubing geometry/material data when kLa is unknown.
+- Evidence: `core/params.py`, `core/model.py`, `core/solver.py`, `core/__init__.py`, `ui/app.py`, `tests/test_params.py`, `tests/test_solver.py`, `tests/test_exports.py`, `docs/DS.md`, `docs/FS.md`, `docs/validation/RTM.md`, `docs/validation/TestProtocol.md`, `docs/validation/TestReport.md`
+- Date: `2026-02-16`
+- Summary: Fixed flow sweep to respect selected transfer model (`kLa` or `Permeability`).
+- Reason/Impact: Prevents incorrect flat/zero sweep output when permeability mode is active.
+- Evidence: `ui/app.py`
+- Date: `2026-02-16`
+- Summary: Added permeability unit selector (`Barrer` or SI-like) and effective transfer diagnostics in UI.
+- Reason/Impact: Prevents scale/unit mis-entry and makes low/high transfer behavior directly inspectable.
+- Evidence: `ui/app.py`
+- Date: `2026-02-16`
+- Summary: Added total O2 throughput metrics and flow-sweep plots in mmol/min.
+- Reason/Impact: Makes it possible to compare concentration-vs-flow tradeoff on total delivered oxygen per minute.
+- Evidence: `ui/app.py`
+- Date: `2026-02-16`
+- Summary: Reworked `clausereview.md` for readability, scientific consistency, and alignment with current dual-mode model.
+- Reason/Impact: Removes encoding/typo issues and gives actionable, up-to-date review findings.
+- Evidence: `clausereview.md`
+- Date: `2026-02-16`
+- Summary: Replaced flow sweep charts with explicit Altair rendering and unit-safe field naming.
+- Reason/Impact: Fixes unreliable sweep plotting behavior and preserves visible unit labels in axes/table.
+- Evidence: `ui/app.py`
+- Date: `2026-02-16`
+- Summary: Persisted last simulation run in session state so flow sweep controls update without re-running.
+- Reason/Impact: Improves workflow by decoupling sweep interaction from the primary run button.
+- Evidence: `ui/app.py`
+- Date: `2026-02-16`
+- Summary: Added outer-shell diameter and gas-flow inputs with O2 supply limitation in the core model.
+- Reason/Impact: Prevents unrealistic oxygen transfer when gas-side throughput is insufficient and exposes annulus/gas residence metrics.
+- Evidence: `core/params.py`, `core/model.py`, `core/solver.py`, `core/__init__.py`, `ui/app.py`, `tests/test_params.py`, `tests/test_solver.py`, `tests/test_exports.py`, `docs/URS.md`, `docs/DS.md`, `docs/FS.md`, `docs/validation/RTM.md`, `docs/validation/TestProtocol.md`, `docs/validation/TestReport.md`
+- Date: `2026-02-16`
+- Summary: Added segmented gas-liquid depletion mode (`segmented`) alongside lumped mode.
+- Reason/Impact: Captures axial gas composition depletion and gives stronger low-gas-flow limitation behavior where expected.
+- Evidence: `core/params.py`, `core/solver.py`, `ui/app.py`, `tests/test_params.py`, `tests/test_solver.py`, `docs/URS.md`, `docs/DS.md`, `docs/FS.md`, `docs/validation/RTM.md`, `docs/validation/TestProtocol.md`, `docs/validation/TestReport.md`
+- Date: `2026-02-16`
+- Summary: Added selectable pressure models in UI (Manual, Conservative curve, Optimistic curve).
+- Reason/Impact: Allows direct scenario comparison with measured flow-pressure behavior and automatic `p_total` derivation from gas flow.
+- Evidence: `ui/app.py`
+- Date: `2026-02-16`
+- Summary: Added calculated pressure visualization to flow sweep.
+- Reason/Impact: Makes pressure-flow coupling directly visible in the sweep outputs and table.
+- Evidence: `ui/app.py`
+- Date: `2026-02-16`
+- Summary: Updated formal docs and added `README.md` with setup, model explanation, and usage guidance.
+- Reason/Impact: Aligns user-facing and validation documentation with current implementation state.
+- Evidence: `README.md`, `docs/URS.md`, `docs/DS.md`, `docs/FS.md`, `docs/validation/RTM.md`, `docs/validation/TestProtocol.md`, `docs/validation/TestReport.md`
+- Date: `2026-02-16`
+- Summary: Added segmented counterflow color-bar visualization with 0-500% DO legend.
+- Reason/Impact: Makes axial oxygenation/depletion patterns interpretable at a glance for both liquid and gas sides.
+- Evidence: `ui/app.py`, `core/solver.py`, `tests/test_solver.py`, `README.md`
+- Date: `2026-02-16`
+- Summary: Added Windows launcher script for Streamlit app startup.
+- Reason/Impact: Simplifies repeatable app startup with correct working directory and Python environment selection.
+- Evidence: `start_app.bat`, `README.md`
