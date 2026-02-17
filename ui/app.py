@@ -676,7 +676,7 @@ def main() -> None:
             min_value=0.0,
             value=2.7e9,
             step=1.0e8,
-            format="%.0f",
+            format="%.3e",
             help="Total number of cells in the culture system.",
         )
         q_o2_cell_e17 = st.number_input(
