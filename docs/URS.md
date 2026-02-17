@@ -1,9 +1,9 @@
 # User Requirements Specification (URS) - CarboxySim MVP
 
 ## 1. Document Control
-- Version: `0.1`
-- Date: `2026-02-16`
-- Status: Draft
+- Version: `0.1.0`
+- Date: `2026-02-17`
+- Status: Released
 - Owner: Research/Engineering
 
 ## 2. Product Goal
@@ -18,7 +18,9 @@ A research tool to simulate time-based outlet concentrations of O2 and N2 added 
 - Time-domain simulation outputs.
 - Single-pass tubing residence-time model from source vessel to outlet measurement point.
 - Plotting of dissolved O2 and N2 vs time.
-- Export of run metadata and timeseries data.
+- Source-vessel perfect-mixing DO% trajectory and time-to-target estimation.
+- Cell oxygen demand based perfusion recommendation.
+- Export of run metadata, Excel datasets, and PDF report.
 - Explicit display of assumptions and units.
 
 ## 5. Out of Scope (MVP)
@@ -39,9 +41,11 @@ A research tool to simulate time-based outlet concentrations of O2 and N2 added 
 - UR-005: User can set simulation horizon and timestep.
 - UR-006: User can run simulation and see O2/N2 trajectories.
 - UR-007: User can inspect final/equilibrium-approach values.
-- UR-008: User can export CSV + JSON metadata.
+- UR-008: User can export Excel + JSON metadata and a PDF report.
 - UR-009: Tool validates invalid inputs with clear error text.
 - UR-010: Re-running with identical inputs reproduces identical outputs.
+- UR-011: User can set total loop hold-up volume and model startup transport delay.
+- UR-012: User can enter total cell number and average O2 uptake to get perfusion recommendation.
 
 ## 7. Usability/Performance Requirements
 - Run time for standard simulation (`t_end <= 3600 s`, `dt >= 0.1 s`) under 2 s on typical laptop.

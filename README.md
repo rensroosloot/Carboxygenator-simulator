@@ -1,38 +1,175 @@
-# CarboxySim
+# CarboxySim 0.1.0
 
-Research tool for simulating O2/N2 transfer into PBS in a carboxygenator-like single-pass tubing setup.
+CarboxySim is a research-focused Streamlit simulator for oxygen/nitrogen transfer into PBS in a carboxygenator-like single-pass tubing setup.
 
-## What This Tool Does
+The tool is intended for engineering exploration, scenario comparison, and pre-lab reasoning.
 
-- Simulates outlet O2/N2 concentration after transfer tubing.
-- Shows DO% as primary output (`100% DO` referenced to air at 1 atm).
-- Supports two transfer models:
-  - `kLa`
-  - `Permeability` (derived effective transfer from tubing data)
-- Supports two gas-liquid coupling models:
-  - `Lumped`
-  - `Segmented depletion` (axial gas depletion along tubing)
-- Includes gas-side O2 supply limitation based on gas flow.
-- Includes selectable pressure modeling:
-  - `Manual`
-  - `Conservative curve`
-  - `Optimistic curve`
-- Includes flow sweep plots and export (CSV + JSON metadata).
-- Includes segmented counterflow bar visualization with color legend:
-  - `0% DO` = white
-  - `500% DO` = red
+## 1. What The App Does
 
-## Project Structure
+CarboxySim simulates:
 
-- `ui/app.py` - Streamlit user interface
+- single-pass dissolved gas transfer (O2/N2) through tubing
+- startup transport delay from total loop hold-up volume
+- gas-side O2 supply limitation
+- optional axial gas depletion (segmented counterflow model)
+- pressure effects (manual or gas-flow-derived)
+- source-vessel recirculation dynamics (perfect-mixing approximation)
+- perfusion recommendation from cell oxygen demand
+
+It provides:
+
+- interactive plots
+- sweep analysis
+- summary metrics
+- exports: Excel, JSON, and PDF report
+
+## 2. Core Modeling Assumptions
+
+The 0.1.0 model assumes:
+
+- liquid phase is non-reactive PBS (no cellular uptake inside transfer core model)
+- gas composition and pressure are constant during one run input state
+- transfer can be represented by either:
+  - direct `kLa`
+  - permeability-derived effective transfer coefficient
+- source vessel is perfectly mixed for recirculation estimate
+- startup delay is governed by:
+  - `transport_delay = total_hold_up_volume / perfusion_speed`
+
+Important:
+
+- this is an engineering approximation tool, not a validated clinical/dosing model
+- parameters (especially permeability/kLa) should be calibrated to your setup data
+
+## 3. Model Modes
+
+### 3.1 Transfer Model
+
+- `kLa`
+  - user enters `kla_o2_s_inv` and `kla_n2_s_inv`
+- `Permeability`
+  - user enters material permeability (Barrer or SI-like units)
+  - app derives effective transfer from tube geometry + solubility
+
+### 3.2 Gas-Liquid Coupling
+
+- `Lumped`
+  - one gas composition for whole exchanger
+- `Segmented depletion`
+  - tubing divided into `n_segments`
+  - gas composition updated segment-by-segment (counterflow effect)
+
+### 3.3 Pressure Model
+
+- `Manual`
+  - user sets `p_total_kpa`
+- `Conservative curve`
+  - `dP_mbar = 4.0 * gas_flow_ml_min`
+- `Optimistic curve`
+  - `dP_mbar = 6.4 * gas_flow_ml_min`
+
+with:
+
+- `p_total_kpa = p_atm_kpa + 0.1 * dP_mbar`
+
+## 4. Main Inputs
+
+The UI includes:
+
+- gas composition:
+  - `O2 [%]` (N2 is auto-computed to 100%)
+- operating conditions:
+  - gas flow
+  - perfusion speed
+  - temperature
+  - pressure model / atmosphere
+- liquid path geometry:
+  - tube ID/OD
+  - shell ID
+  - tube length
+  - total hold-up volume
+- transfer settings:
+  - kLa or permeability inputs
+  - segmented/lumped selection
+- initialization:
+  - inlet DO2%
+  - inlet N2%
+  - target source DO2%
+- simulation horizon:
+  - `t_end_min`
+  - `dt_min`
+- cell demand:
+  - `total_cells`
+  - `q_o2_cell [x1e-17 mol/cell/s]`
+  - demand margin factor
+
+## 5. Main Outputs
+
+- segmented counterflow visualization (when segmented mode is active)
+- source vessel target panel:
+  - start DO2
+  - target DO2
+  - estimated time to target
+  - status
+- source vessel DO2 vs time plot
+- flow sweep:
+  - outlet DO%
+  - O2 throughput / net O2 added
+- cell-demand perfusion recommendation
+- summary metrics:
+  - transfer residence time
+  - transport delay
+  - effective transfer coefficients
+  - O2 supply / limitation status
+
+## 6. Cell Demand Recommendation Logic
+
+The app computes oxygen demand from:
+
+- `N_cells`
+- average cellular oxygen uptake `q_O2_cell`
+
+Formula:
+
+- `O2_demand_mmol_min = N_cells * q_O2_cell(mol/cell/s) * 60 * 1000 * margin`
+
+Then it scans flow sweep results and returns the first perfusion flow where:
+
+- `o2_net_added_mmol_min >= O2_demand_mmol_min`
+
+If not found, app reports demand is not met within the current sweep range.
+
+## 7. Exports
+
+Available in-app downloads:
+
+- `Timeseries Excel` (`.xlsx`)
+- `Source Vessel Excel` (`.xlsx`)
+- `Metadata JSON` (`.json`)
+- `PDF Report` (`.pdf`)
+
+PDF report includes:
+
+- key graphs first
+- assumptions
+- detailed settings with explanation
+- run summary
+- flow sweep data table
+
+If Excel/PDF dependencies are unavailable in deployment environment, app falls back with safe warnings (and CSV fallback for Excel).
+
+## 8. Repository Structure
+
+- `streamlit_app.py` - Streamlit Cloud entrypoint
+- `ui/app.py` - UI and reporting/export logic
 - `core/params.py` - input schema and validation
-- `core/model.py` - core equations and helper calculations
-- `core/solver.py` - simulation execution
-- `core/results.py` - output containers and export helpers
+- `core/model.py` - physics/helper equations
+- `core/solver.py` - simulation routines
+- `core/results.py` - output data structures + export helpers
 - `tests/` - unit and integration tests
 - `docs/` - URS/DS/FS and validation artifacts
 
-## Install
+## 9. Local Setup
 
 From repository root:
 
@@ -40,82 +177,44 @@ From repository root:
 python -m pip install -e .
 ```
 
-## Run The App
+Run:
 
 ```powershell
 python -m streamlit run ui/app.py
 ```
 
-If imports fail from your environment, run from repo root and set:
-
-```powershell
-$env:PYTHONPATH = (Get-Location).Path
-python -m streamlit run ui/app.py
-```
-
-### Quick Start (Windows)
-
-Double-click or run:
+Windows helper:
 
 ```powershell
 .\start_app.bat
 ```
 
-This script:
-- switches to repo root
-- sets `PYTHONPATH`
-- uses `.venv\Scripts\python.exe` if available
-- otherwise falls back to `py` or `python`
+After startup, open the URL shown in terminal (usually `http://localhost:8501`).
 
-After startup, open the URL shown in the terminal (usually `http://localhost:8501`) in your browser.
-
-## Test
+## 10. Testing
 
 ```powershell
 python -m pytest -q
 ```
 
-## Key Inputs
+## 11. Streamlit Cloud Deployment
 
-- Gas composition: `O2 [%]` (N2 auto = 100 - O2)
-- Liquid flow: `flow_ml_min`
-- Gas flow: `gas_flow_ml_min`
-- Geometry:
-  - `tube_id_mm`
-  - `tube_od_mm`
-  - `shell_id_mm`
-  - `tube_length_cm`
-- Transfer model:
-  - `kLa` with `kla_o2_s_inv`, `kla_n2_s_inv`
-  - `Permeability` with `perm_o2`, `perm_n2` (+ unit selection)
-- Gas-liquid coupling:
-  - `Lumped`
-  - `Segmented depletion` with `n_segments`
-- Pressure model:
-  - `Manual` (`p_total_kpa`)
-  - `Conservative curve`
-  - `Optimistic curve`
+Use:
 
-## Pressure Curves Used In UI
+- Repository: `rensroosloot/Carboxygenator-simulator`
+- Branch: `main`
+- Main file path: `streamlit_app.py`
 
-- Conservative: `dP_mbar = 4.0 * Q_gas_ml_min`
-- Optimistic: `dP_mbar = 6.4 * Q_gas_ml_min`
-- `p_total_kpa = p_atm_kpa + 0.1 * dP_mbar`
+## 12. Versioning
 
-## Important Notes
+Current release:
 
-- This is an MVP research model, not a certified clinical model.
-- Current solubility model uses fixed constants (temperature input exists but is not yet fully temperature-coupled).
-- Segmented mode is recommended when low gas flow causes noticeable gas depletion effects.
-- In segmented mode, the app shows a two-lane color bar:
-  - liquid DO% progression (left -> right)
-  - gas O2 potential progression (right -> left, counterflow)
-- Flow sweep controls update live using the last executed run; model-side input changes require pressing `Run Simulation`.
+- `0.1.0` (research MVP with reporting, segmented analysis, source-vessel dynamics, and demand-based perfusion recommendation)
 
-## Documentation
+## 13. Documentation Links
 
-- Requirements: `docs/URS.md`
-- Design: `docs/DS.md`
-- Functional spec: `docs/FS.md`
-- Validation docs: `docs/validation/`
+- User Requirements: `docs/URS.md`
+- Design Specification: `docs/DS.md`
+- Functional Specification: `docs/FS.md`
+- Validation artifacts: `docs/validation/`
 - Change history: `CHANGELOG.md`

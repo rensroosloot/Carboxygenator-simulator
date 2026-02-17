@@ -3,6 +3,23 @@
 All meaningful changes to this project are tracked here.
 
 ## [Unreleased]
+
+## [0.1.0] - 2026-02-17
+- First stable research MVP release of CarboxySim.
+- Added single-pass O2/N2 transfer simulation with both `kLa` and permeability modes.
+- Added gas-side O2 supply limitation and selectable pressure models.
+- Added segmented depletion mode with counterflow visualization.
+- Added transport-delay handling via configurable total hold-up volume.
+- Added source-vessel perfect-mixing DO trajectory and time-to-target estimation.
+- Added cell-demand based perfusion recommendation from O2 balance.
+- Added exports:
+  - Excel timeseries
+  - Excel source-vessel trajectory
+  - metadata JSON
+  - PDF report with graphs + settings explanations + summary + flow-sweep table
+- Completed GAMP5-style spec and validation documentation set (`URS`, `DS`, `FS`, validation artifacts).
+- Released comprehensive README with assumptions, equations, usage, deployment, and interpretation guidance.
+
 - Date: `2026-02-16`
 - Summary: Initialized GAMP5 validation scaffolding and documentation governance.
 - Reason/Impact: Establishes traceable development and validation workflow before implementation.

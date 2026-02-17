@@ -1,9 +1,9 @@
 # Functional Specification (FS) - CarboxySim MVP
 
 ## 1. Document Control
-- Version: `0.1`
-- Date: `2026-02-16`
-- Status: Draft
+- Version: `0.1.0`
+- Date: `2026-02-17`
+- Status: Released
 
 ## 2. Physical Assumptions
 - Single-pass liquid flow through carboxygenator tubing.
@@ -32,6 +32,14 @@ For each species `i in {O2, N2}`:
    - in each segment, update gas composition from transferred O2/N2 before computing next local `C*`.
 11. Pressure mode:
    - Manual or flow-derived pressure curve (conservative/optimistic).
+12. Transport delay:
+   - `tau_transport = V_hold_up / Q_liq`
+   - where `V_hold_up` is user-provided total loop hold-up (or tube-volume fallback).
+13. Source-vessel perfect-mixing approximation:
+   - `dC_vessel/dt = (Q_liq/V_vessel) * (C_return_delayed - C_vessel)`
+14. Cell-demand recommendation:
+   - `O2_demand_mmol_min = N_cells * q_O2_cell(mol/cell/s) * 60 * 1000 * margin`
+   - choose first flow where `o2_net_added_mmol_min >= O2_demand_mmol_min`
 
 Where:
 - `C_i,in`, `C_i,out` in `mmol/L`
@@ -59,6 +67,9 @@ Output interpretation:
 - `simulate(inputs, solubility_model) -> SimulationOutputs`
 - `export_csv(outputs, path) -> None`
 - `export_metadata_json(inputs, outputs, path) -> None`
+- UI report/export helpers:
+  - Excel timeseries and source-vessel trajectory
+  - PDF report generation with graphs + explained settings + summary + flow-sweep table
 
 ## 5. Units Standard
 - Time: `s`
@@ -88,6 +99,9 @@ Output interpretation:
 - AC-009 (permeability mode): with permeability mode active, `P_i=0` gives `C_i,out = C_i,in`; higher `P_i` increases transfer toward `C_i*`.
 - AC-010 (gas supply limit): low gas flow caps O2 transfer, reducing `C_O2,out` versus unrestricted case.
 - AC-011 (segmented depletion): at low gas flow and high transfer rates, segmented mode predicts equal or lower `C_O2,out` than lumped mode.
+- AC-012 (hold-up delay): increasing total hold-up volume increases startup delay.
+- AC-013 (cell-demand recommendation): recommended flow is first sweep point meeting/exceeding demand, else explicit unmet warning.
+- AC-014 (report/export): Excel/JSON/PDF exports complete without runtime errors in supported environments.
 
 ## 7. Baseline Synthetic Scenario
 Use one canonical test scenario in FS appendix:
@@ -119,3 +133,5 @@ Expected behavior:
 | UR-008 | Export CSV + JSON metadata | AC-007 |
 | UR-009 | Validate invalid inputs with clear errors | AC-004 |
 | UR-010 | Reproducible outputs for identical inputs | AC-006 |
+| UR-011 | Set total hold-up volume and startup delay behavior | AC-012 |
+| UR-012 | Enter cell demand and obtain perfusion recommendation | AC-013 |

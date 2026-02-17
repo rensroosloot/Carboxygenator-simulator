@@ -1,9 +1,9 @@
 # Design Specification (DS) - CarboxySim MVP
 
 ## 1. Document Control
-- Version: `0.1`
-- Date: `2026-02-16`
-- Status: Draft
+- Version: `0.1.0`
+- Date: `2026-02-17`
+- Status: Released
 
 ## 2. Architecture Overview
 Modules:
@@ -35,6 +35,7 @@ Modules:
   - `perm_n2_mmol_m_per_m2_s_kpa: float | None` (required in permeability mode)
   - `gas_liquid_model: str` (`"lumped"` or `"segmented"`)
   - `n_segments: int` (required `>=2` for segmented mode)
+  - `total_hold_up_volume_ml: float | None` (optional override for startup transport delay)
   - `c_o2_init_mmol_l: float`
   - `c_n2_init_mmol_l: float`
   - `t_end_s: float`
@@ -73,8 +74,23 @@ Validation rules:
 - `k_eff` comes from:
   - `kLa` mode: direct user-entered `kLa`
   - permeability mode: effective `k_eff` derived from OD/ID/thickness, permeability, and solubility
+- Startup transport delay:
+  - default from tube volume and flow
+  - optional override by `total_hold_up_volume_ml` to represent full loop hold-up
 - Time vector remains discrete (`n = floor(t_end/dt) + 1`) for visualization/export.
 - Deterministic behavior, no adaptive solver in MVP.
+
+## 4a. Report and Recommendation Layer
+- UI computes source-vessel DO trajectory using a perfect-mixing recirculation approximation with transport delay.
+- UI computes cell oxygen demand:
+  - `O2_demand = total_cells * q_o2_cell * 60 * 1000 * margin`
+- UI recommends perfusion speed from first sweep point where:
+  - `o2_net_added_mmol_min >= O2_demand`
+- Export layer supports:
+  - Excel timeseries
+  - Excel source-vessel trajectory
+  - JSON metadata
+  - PDF report with graphs, settings explanation, summary, and flow-sweep table
 
 ## 5. Error Handling
 - Raise `ValueError` with field-specific messages from validation layer.
