@@ -378,67 +378,6 @@ def _build_pdf_report_bytes(
     story.append(summary_table)
     story.append(PageBreak())
 
-    story.append(Paragraph("Timeseries Data (All Rows)", style_h2))
-    timeseries_df = pd.DataFrame(
-        {
-            "time_s": outputs.time_s,
-            "time_min": outputs.time_s / 60.0,
-            "c_o2_mmol_l": outputs.c_o2_mmol_l,
-            "c_n2_mmol_l": outputs.c_n2_mmol_l,
-            "do2_percent": do_percent,
-        }
-    )
-    ts_rows = [["time_s", "time_min", "c_o2_mmol_l", "c_n2_mmol_l", "do2_percent"]]
-    for row in timeseries_df.itertuples(index=False):
-        ts_rows.append(
-            [
-                f"{float(row.time_s):.3f}",
-                f"{float(row.time_min):.5f}",
-                f"{float(row.c_o2_mmol_l):.8f}",
-                f"{float(row.c_n2_mmol_l):.8f}",
-                f"{float(row.do2_percent):.5f}",
-            ]
-        )
-    ts_table = Table(ts_rows, repeatRows=1, colWidths=[90, 90, 110, 110, 100])
-    ts_table.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, 0), c_header),
-                ("BACKGROUND", (0, 1), (-1, -1), c_card),
-                ("TEXTCOLOR", (0, 0), (-1, -1), c_text),
-                ("GRID", (0, 0), (-1, -1), 0.2, c_grid),
-                ("FONTSIZE", (0, 0), (-1, -1), 6),
-            ]
-        )
-    )
-    story.append(ts_table)
-    story.append(PageBreak())
-
-    story.append(Paragraph("Source Vessel DO Trajectory (All Rows)", style_h2))
-    sv_rows = [["time_s", "time_min", "source_do2_percent"]]
-    for row in source_vessel_df.itertuples(index=False):
-        sv_rows.append(
-            [
-                f"{float(row.time_s):.3f}",
-                f"{float(row.time_min):.5f}",
-                f"{float(row.source_do2_percent):.6f}",
-            ]
-        )
-    sv_table = Table(sv_rows, repeatRows=1, colWidths=[120, 120, 160])
-    sv_table.setStyle(
-        TableStyle(
-            [
-                ("BACKGROUND", (0, 0), (-1, 0), c_header),
-                ("BACKGROUND", (0, 1), (-1, -1), c_card),
-                ("TEXTCOLOR", (0, 0), (-1, -1), c_text),
-                ("GRID", (0, 0), (-1, -1), 0.2, c_grid),
-                ("FONTSIZE", (0, 0), (-1, -1), 6),
-            ]
-        )
-    )
-    story.append(sv_table)
-    story.append(PageBreak())
-
     story.append(Paragraph("Flow Sweep Data (All Rows)", style_h2))
     sw_rows = [
         [
