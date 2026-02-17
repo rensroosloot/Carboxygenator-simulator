@@ -119,6 +119,8 @@ def _build_pdf_report_bytes(
         from reportlab.lib import colors
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.styles import getSampleStyleSheet
+        from reportlab.graphics.charts.lineplots import LinePlot
+        from reportlab.graphics.shapes import Drawing, String
         from reportlab.platypus import PageBreak, Paragraph, SimpleDocTemplate, Spacer, Table, TableStyle
     except ModuleNotFoundError as exc:
         raise RuntimeError("PDF export unavailable: missing 'reportlab'.") from exc
@@ -135,6 +137,53 @@ def _build_pdf_report_bytes(
     styles = getSampleStyleSheet()
     story = []
 
+    def _downsample_xy(x_vals: list[float], y_vals: list[float], max_points: int = 300) -> list[tuple[float, float]]:
+        if len(x_vals) <= max_points:
+            return [(float(x), float(y)) for x, y in zip(x_vals, y_vals)]
+        idx = np.linspace(0, len(x_vals) - 1, max_points, dtype=int)
+        return [(float(x_vals[i]), float(y_vals[i])) for i in idx]
+
+    def _line_plot_drawing(
+        title: str,
+        x_label: str,
+        y_label: str,
+        x_vals: list[float],
+        y_vals: list[float],
+    ) -> Drawing:
+        points = _downsample_xy(x_vals, y_vals)
+        xs = [p[0] for p in points]
+        ys = [p[1] for p in points]
+        x_min = min(xs) if xs else 0.0
+        x_max = max(xs) if xs else 1.0
+        y_min = min(ys) if ys else 0.0
+        y_max = max(ys) if ys else 1.0
+        if abs(x_max - x_min) < 1e-12:
+            x_max = x_min + 1.0
+        if abs(y_max - y_min) < 1e-12:
+            y_max = y_min + 1.0
+
+        drawing = Drawing(540, 240)
+        drawing.add(String(270, 225, title, textAnchor="middle", fontSize=11))
+        drawing.add(String(270, 12, x_label, textAnchor="middle", fontSize=8))
+        drawing.add(String(10, 120, y_label, fontSize=8, angle=90))
+
+        plot = LinePlot()
+        plot.x = 50
+        plot.y = 35
+        plot.width = 470
+        plot.height = 165
+        plot.data = [points]
+        plot.lines[0].strokeColor = colors.HexColor("#1f77b4")
+        plot.lines[0].strokeWidth = 1.2
+        plot.xValueAxis.valueMin = x_min
+        plot.xValueAxis.valueMax = x_max
+        plot.yValueAxis.valueMin = y_min
+        plot.yValueAxis.valueMax = y_max
+        plot.xValueAxis.valueStep = (x_max - x_min) / 5.0
+        plot.yValueAxis.valueStep = (y_max - y_min) / 5.0
+        drawing.add(plot)
+        return drawing
+
     story.append(Paragraph("CarboxySim Report", styles["Title"]))
     story.append(
         Paragraph(
@@ -150,6 +199,37 @@ def _build_pdf_report_bytes(
         )
     )
     story.append(Spacer(1, 10))
+    story.append(Paragraph("Key Graphs", styles["Heading2"]))
+    story.append(
+        _line_plot_drawing(
+            title="Source Vessel DO2 vs Time",
+            x_label="Time [min]",
+            y_label="Source DO2 [%]",
+            x_vals=[float(v) for v in source_vessel_df["time_min"].tolist()],
+            y_vals=[float(v) for v in source_vessel_df["source_do2_percent"].tolist()],
+        )
+    )
+    story.append(Spacer(1, 8))
+    story.append(
+        _line_plot_drawing(
+            title="Flow Sweep: Outlet DO2 vs Flow",
+            x_label="Flow [mL/min]",
+            y_label="Outlet DO2 [%]",
+            x_vals=[float(v) for v in sweep_df["flow_ml_min"].tolist()],
+            y_vals=[float(v) for v in sweep_df["do_o2_out_percent"].tolist()],
+        )
+    )
+    story.append(Spacer(1, 8))
+    story.append(
+        _line_plot_drawing(
+            title="Flow Sweep: Net O2 Added vs Flow",
+            x_label="Flow [mL/min]",
+            y_label="Net O2 [mmol/min]",
+            x_vals=[float(v) for v in sweep_df["flow_ml_min"].tolist()],
+            y_vals=[float(v) for v in sweep_df["o2_net_added_mmol_min"].tolist()],
+        )
+    )
+    story.append(PageBreak())
 
     story.append(Paragraph("Input Settings (Detailed)", styles["Heading2"]))
     setting_explanations = {
