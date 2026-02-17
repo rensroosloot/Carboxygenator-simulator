@@ -217,8 +217,13 @@ def simulate(inputs: SimulationInputs, solubility_model: SolubilityModel) -> Sim
     c_n2 = np.full(n_steps, steady_out_n2, dtype=float)
 
     # Represent startup transport delay before treated fluid reaches outlet.
-    residence_time_s = float(steady_meta["residence_time_s"])
-    delay_mask = time_s < residence_time_s
+    transport_volume_ml = (
+        float(inputs.total_hold_up_volume_ml)
+        if inputs.total_hold_up_volume_ml is not None
+        else float(steady_meta["tube_volume_ml"])
+    )
+    transport_delay_s = compute_residence_time_s(inputs.flow_ml_min, transport_volume_ml)
+    delay_mask = time_s < transport_delay_s
     c_o2[delay_mask] = inputs.c_o2_init_mmol_l
     c_n2[delay_mask] = inputs.c_n2_init_mmol_l
 
@@ -238,6 +243,8 @@ def simulate(inputs: SimulationInputs, solubility_model: SolubilityModel) -> Sim
         "o2_transfer_limited": steady_meta["o2_transfer_limited"],
         "gas_liquid_model": steady_meta["gas_liquid_model"],
         "n_segments": steady_meta["n_segments"],
+        "transport_volume_ml": transport_volume_ml,
+        "transport_delay_s": transport_delay_s,
     }
     if inputs.gas_liquid_model == "segmented":
         metadata["gas_out_y_o2"] = float(steady_meta["gas_out_y_o2"])

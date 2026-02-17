@@ -102,3 +102,11 @@ def test_validate_inputs_rejects_segmented_with_too_few_segments() -> None:
     with pytest.raises(ValueError) as exc:
         validate_inputs(invalid)
     assert "n_segments must be >= 2 when gas_liquid_model='segmented'" in str(exc.value)
+
+
+def test_validate_inputs_rejects_non_positive_total_hold_up_volume() -> None:
+    inputs = _baseline_inputs()
+    invalid = replace(inputs, total_hold_up_volume_ml=0.0)
+    with pytest.raises(ValueError) as exc:
+        validate_inputs(invalid)
+    assert "total_hold_up_volume_ml must be > 0 when provided" in str(exc.value)

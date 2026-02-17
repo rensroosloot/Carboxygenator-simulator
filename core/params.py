@@ -28,6 +28,7 @@ class SimulationInputs:
     perm_n2_mmol_m_per_m2_s_kpa: float | None = None
     gas_liquid_model: str = "lumped"
     n_segments: int = 40
+    total_hold_up_volume_ml: float | None = None
 
 
 def validate_inputs(inputs: SimulationInputs) -> None:
@@ -58,6 +59,8 @@ def validate_inputs(inputs: SimulationInputs) -> None:
         errors.append("tube_length_cm must be > 0")
     if inputs.gas_flow_ml_min <= 0.0:
         errors.append("gas_flow_ml_min must be > 0")
+    if inputs.total_hold_up_volume_ml is not None and inputs.total_hold_up_volume_ml <= 0.0:
+        errors.append("total_hold_up_volume_ml must be > 0 when provided")
     if inputs.t_end_s <= 0.0:
         errors.append("t_end_s must be > 0")
     if inputs.dt_s <= 0.0:

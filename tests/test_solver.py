@@ -202,3 +202,21 @@ def test_compute_single_pass_steady_outlet_matches_simulate_terminal_value() -> 
     outputs = simulate(inputs, constant_solubility_model)
     assert abs(steady_o2 - outputs.c_o2_mmol_l[-1]) < 1e-12
     assert abs(steady_n2 - outputs.c_n2_mmol_l[-1]) < 1e-12
+
+
+def test_total_hold_up_volume_extends_startup_delay() -> None:
+    base = replace(
+        _baseline_inputs(),
+        flow_ml_min=2.0,
+        t_end_s=1200.0,
+        dt_s=1.0,
+    )
+    default_delay = simulate(base, constant_solubility_model)
+    extended_delay = simulate(
+        replace(base, total_hold_up_volume_ml=28.0),
+        constant_solubility_model,
+    )
+    assert float(extended_delay.metadata["transport_delay_s"]) > float(default_delay.metadata["transport_delay_s"])
+    assert np.isclose(default_delay.c_o2_mmol_l[500], default_delay.c_o2_mmol_l[-1])  # transfer visible by ~500s
+    assert np.isclose(extended_delay.c_o2_mmol_l[500], base.c_o2_init_mmol_l)  # still delayed at ~500s
+    assert np.isclose(extended_delay.c_o2_mmol_l[1000], extended_delay.c_o2_mmol_l[-1])  # transfer arrived by ~1000s

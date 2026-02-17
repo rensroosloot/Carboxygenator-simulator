@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+from collections import deque
 from dataclasses import replace
 from dataclasses import asdict
 import io
@@ -16,6 +17,7 @@ import streamlit as st
 from core import (
     SimulationInputs,
     compute_single_pass_steady_outlet,
+    compute_tube_volume_ml,
     compute_equilibrium_concentrations,
     constant_solubility_model,
     simulate,
@@ -112,6 +114,15 @@ def _estimate_time_to_target_do_source_vessel(
     dt_s = max(max_time_s / 4000.0, min(30.0, max(1.0, tau_s / 10.0)))
     n_steps = int(max_time_s / dt_s)
     reaching_up = target_c_o2 > c_o2
+    transport_volume_ml = (
+        float(inputs.total_hold_up_volume_ml)
+        if inputs.total_hold_up_volume_ml is not None
+        else compute_tube_volume_ml(inputs.tube_id_mm, inputs.tube_length_cm)
+    )
+    transport_delay_s = (transport_volume_ml / max(inputs.flow_ml_min, 1e-12)) * 60.0
+    delay_steps = max(0, int(round(transport_delay_s / dt_s)))
+    out_hist_o2 = [c_o2 for _ in range(delay_steps + 1)]
+    out_hist_n2 = [c_n2 for _ in range(delay_steps + 1)]
 
     for step in range(1, n_steps + 1):
         c_o2_out, c_n2_out, _ = compute_single_pass_steady_outlet(
@@ -120,9 +131,13 @@ def _estimate_time_to_target_do_source_vessel(
             c_o2_in_mmol_l=c_o2,
             c_n2_in_mmol_l=c_n2,
         )
+        out_hist_o2.append(c_o2_out)
+        out_hist_n2.append(c_n2_out)
+        delayed_out_o2 = out_hist_o2.pop(0)
+        delayed_out_n2 = out_hist_n2.pop(0)
         dt_min = dt_s / 60.0
-        dc_o2_dt = (q_l_min / vessel_volume_l) * (c_o2_out - c_o2)
-        dc_n2_dt = (q_l_min / vessel_volume_l) * (c_n2_out - c_n2)
+        dc_o2_dt = (q_l_min / vessel_volume_l) * (delayed_out_o2 - c_o2)
+        dc_n2_dt = (q_l_min / vessel_volume_l) * (delayed_out_n2 - c_n2)
         c_o2 += dc_o2_dt * dt_min
         c_n2 += dc_n2_dt * dt_min
         t_now_s = step * dt_s
@@ -132,6 +147,73 @@ def _estimate_time_to_target_do_source_vessel(
             return True, t_now_s, (c_o2 / max(do_ref_o2_mmol_l, 1e-15)) * 100.0
 
     return False, None, (c_o2 / max(do_ref_o2_mmol_l, 1e-15)) * 100.0
+
+
+def _simulate_source_vessel_do_timeseries(
+    inputs: SimulationInputs,
+    do_ref_o2_mmol_l: float,
+    t_end_s: float,
+    dt_s: float,
+) -> pd.DataFrame:
+    """Simulate source-vessel DO% trajectory for a perfectly mixed recirculating vessel."""
+
+    # Keep plotting responsive for long horizons by capping point count.
+    max_points = 1200
+    eff_dt_s = max(dt_s, t_end_s / max_points)
+    n_steps = int(np.floor(t_end_s / eff_dt_s)) + 1
+    time_s = np.arange(n_steps, dtype=float) * eff_dt_s
+
+    c_o2 = float(inputs.c_o2_init_mmol_l)
+    c_n2 = float(inputs.c_n2_init_mmol_l)
+    q_l_min = inputs.flow_ml_min / 1000.0
+    vessel_volume_l = max(inputs.volume_l, 1e-15)
+
+    transport_volume_ml = (
+        float(inputs.total_hold_up_volume_ml)
+        if inputs.total_hold_up_volume_ml is not None
+        else compute_tube_volume_ml(inputs.tube_id_mm, inputs.tube_length_cm)
+    )
+    transport_delay_s = (transport_volume_ml / max(inputs.flow_ml_min, 1e-15)) * 60.0
+    delay_steps = max(0, int(round(transport_delay_s / max(eff_dt_s, 1e-12))))
+    out_hist_o2: deque[float] = deque([c_o2] * (delay_steps + 1), maxlen=delay_steps + 1)
+    out_hist_n2: deque[float] = deque([c_n2] * (delay_steps + 1), maxlen=delay_steps + 1)
+
+    rows = [
+        {
+            "time_s": 0.0,
+            "time_min": 0.0,
+            "source_do2_percent": (c_o2 / max(do_ref_o2_mmol_l, 1e-15)) * 100.0,
+        }
+    ]
+    dt_min = eff_dt_s / 60.0
+
+    for step in range(1, n_steps):
+        c_o2_out, c_n2_out, _ = compute_single_pass_steady_outlet(
+            inputs=inputs,
+            solubility_model=constant_solubility_model,
+            c_o2_in_mmol_l=c_o2,
+            c_n2_in_mmol_l=c_n2,
+        )
+        delayed_out_o2 = out_hist_o2[0]
+        delayed_out_n2 = out_hist_n2[0]
+        out_hist_o2.append(c_o2_out)
+        out_hist_n2.append(c_n2_out)
+
+        dc_o2_dt = (q_l_min / vessel_volume_l) * (delayed_out_o2 - c_o2)
+        dc_n2_dt = (q_l_min / vessel_volume_l) * (delayed_out_n2 - c_n2)
+        c_o2 += dc_o2_dt * dt_min
+        c_n2 += dc_n2_dt * dt_min
+
+        t_s = float(time_s[step])
+        rows.append(
+            {
+                "time_s": t_s,
+                "time_min": t_s / 60.0,
+                "source_do2_percent": (c_o2 / max(do_ref_o2_mmol_l, 1e-15)) * 100.0,
+            }
+        )
+
+    return pd.DataFrame(rows)
 
 
 def main() -> None:
@@ -233,6 +315,18 @@ def main() -> None:
             value=defaults.tube_length_cm,
             step=1.0,
             help="Effective gas-exchange tubing length.",
+        )
+        auto_tube_volume_ml = compute_tube_volume_ml(tube_id_mm, tube_length_cm)
+        total_hold_up_volume_ml = st.number_input(
+            "total_hold_up_volume_ml [mL]",
+            min_value=0.001,
+            value=float(auto_tube_volume_ml),
+            step=0.5,
+            help="Total liquid hold-up from source through loop to measurement point. Used for startup transport delay.",
+        )
+        st.caption(
+            f"Derived transport delay = volume / perfusion speed = "
+            f"{(total_hold_up_volume_ml / max(flow_ml_min, 1e-12)):.2f} min"
         )
         pressure_mode = st.selectbox(
             "Pressure model",
@@ -362,20 +456,22 @@ def main() -> None:
             )
         )
         t_end_s = st.number_input(
-            "t_end_s [s]",
+            "t_end_min [min]",
             min_value=0.1,
-            value=defaults.t_end_s,
-            step=60.0,
+            value=defaults.t_end_s / 60.0,
+            step=1.0,
             help="Total simulated time window.",
         )
         dt_s = st.number_input(
-            "dt_s [s]",
+            "dt_min [min]",
             min_value=0.0001,
-            value=defaults.dt_s,
-            step=0.1,
-            format="%.6f",
+            value=defaults.dt_s / 60.0,
+            step=0.01,
+            format="%.4f",
             help="Time resolution for generated output points.",
         )
+        t_end_s *= 60.0
+        dt_s *= 60.0
         auto_run = st.checkbox(
             "Auto-run simulation",
             value=True,
@@ -412,6 +508,7 @@ def main() -> None:
         perm_n2_mmol_m_per_m2_s_kpa=perm_n2,
         gas_liquid_model=gas_liquid_model,
         n_segments=n_segments,
+        total_hold_up_volume_ml=total_hold_up_volume_ml,
     )
 
     should_run = run
@@ -556,6 +653,31 @@ def main() -> None:
         f"Predicted source DO after 8 h max window: {final_pred_do_percent:.2f}%. "
         "Assumption: source vessel is perfectly mixed and recirculates through tubing."
     )
+    if reached_target and target_time_s is not None:
+        source_plot_t_end_s = max(float(target_time_s) * 1.05, 60.0)
+    else:
+        source_plot_t_end_s = 8.0 * 3600.0
+    source_vessel_df = _simulate_source_vessel_do_timeseries(
+        inputs=inputs,
+        do_ref_o2_mmol_l=do_ref_o2_mmol_l,
+        t_end_s=source_plot_t_end_s,
+        dt_s=inputs.dt_s,
+    )
+    source_chart = (
+        alt.Chart(source_vessel_df)
+        .mark_line()
+        .encode(
+            x=alt.X("time_min:Q", title="Time [min]"),
+            y=alt.Y("source_do2_percent:Q", title="Source vessel DO2 [%]"),
+            tooltip=[
+                alt.Tooltip("time_min:Q", title="Time [min]", format=".2f"),
+                alt.Tooltip("source_do2_percent:Q", title="DO2 [%]", format=".2f"),
+            ],
+        )
+        .properties(height=260)
+    )
+    st.altair_chart(source_chart, use_container_width=True)
+    st.caption("Source-vessel plot is adaptively downsampled for performance on long time windows.")
 
     st.markdown("### Export")
     csv_text = _build_csv_text(outputs.time_s, outputs.c_o2_mmol_l, outputs.c_n2_mmol_l)
@@ -681,9 +803,11 @@ def main() -> None:
     col1.metric("pressure_mode", str(pressure_context["pressure_mode"]))
     col2.metric("delta_p [mbar]", f"{float(pressure_context['delta_p_mbar']):.1f}")
     col1.metric("tube_volume_ml [mL]", f"{float(outputs.metadata['tube_volume_ml']):.3f}")
-    col2.metric("liquid_residence_time_s [s]", f"{float(outputs.metadata['residence_time_s']):.2f}")
+    col2.metric("transfer_residence_time_min [min]", f"{float(outputs.metadata['residence_time_s']) / 60.0:.2f}")
     col1.metric("annulus_volume_ml [mL]", f"{float(outputs.metadata['annulus_volume_ml']):.3f}")
-    col2.metric("gas_residence_time_s [s]", f"{float(outputs.metadata['gas_residence_time_s']):.2f}")
+    col2.metric("gas_residence_time_min [min]", f"{float(outputs.metadata['gas_residence_time_s']) / 60.0:.2f}")
+    col1.metric("transport_volume_ml [mL]", f"{float(outputs.metadata['transport_volume_ml']):.3f}")
+    col2.metric("transport_delay_min [min]", f"{float(outputs.metadata['transport_delay_s']) / 60.0:.2f}")
     col1.metric("k_eff_o2 [1/s]", f"{float(outputs.metadata['effective_kla_o2_s_inv']):.4e}")
     col2.metric("k_eff_n2 [1/s]", f"{float(outputs.metadata['effective_kla_n2_s_inv']):.4e}")
     col1.metric("Gas-liquid model", str(outputs.metadata["gas_liquid_model"]))
