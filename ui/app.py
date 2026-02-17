@@ -179,6 +179,8 @@ def _build_pdf_report_bytes(
         y_label: str,
         x_vals: list[float],
         y_vals: list[float],
+        x_fmt: str = "%.1f",
+        y_fmt: str = "%.2f",
     ) -> Drawing:
         points = _downsample_xy(x_vals, y_vals)
         xs = [p[0] for p in points]
@@ -212,6 +214,8 @@ def _build_pdf_report_bytes(
         plot.yValueAxis.valueMax = y_max
         plot.xValueAxis.valueStep = (x_max - x_min) / 5.0
         plot.yValueAxis.valueStep = (y_max - y_min) / 5.0
+        plot.xValueAxis.labelTextFormat = x_fmt
+        plot.yValueAxis.labelTextFormat = y_fmt
         plot.xValueAxis.strokeColor = c_grid
         plot.yValueAxis.strokeColor = c_grid
         plot.xValueAxis.labels.fillColor = c_muted
@@ -244,6 +248,8 @@ def _build_pdf_report_bytes(
             y_label="Source DO2 [%]",
             x_vals=[float(v) for v in source_vessel_df["time_min"].tolist()],
             y_vals=[float(v) for v in source_vessel_df["source_do2_percent"].tolist()],
+            x_fmt="%.1f",
+            y_fmt="%.1f",
         )
     )
     story.append(Spacer(1, 8))
@@ -254,6 +260,8 @@ def _build_pdf_report_bytes(
             y_label="Outlet DO2 [%]",
             x_vals=[float(v) for v in sweep_df["flow_ml_min"].tolist()],
             y_vals=[float(v) for v in sweep_df["do_o2_out_percent"].tolist()],
+            x_fmt="%.1f",
+            y_fmt="%.1f",
         )
     )
     story.append(Spacer(1, 8))
@@ -264,6 +272,8 @@ def _build_pdf_report_bytes(
             y_label="Net O2 [mmol/min]",
             x_vals=[float(v) for v in sweep_df["flow_ml_min"].tolist()],
             y_vals=[float(v) for v in sweep_df["o2_net_added_mmol_min"].tolist()],
+            x_fmt="%.1f",
+            y_fmt="%.4f",
         )
     )
     story.append(PageBreak())
@@ -1041,8 +1051,8 @@ def main() -> None:
         alt.Chart(source_vessel_df)
         .mark_line()
         .encode(
-            x=alt.X("time_min:Q", title="Time [min]"),
-            y=alt.Y("source_do2_percent:Q", title="Source vessel DO2 [%]"),
+            x=alt.X("time_min:Q", title="Time [min]", axis=alt.Axis(format=".1f")),
+            y=alt.Y("source_do2_percent:Q", title="Source vessel DO2 [%]", axis=alt.Axis(format=".1f")),
             tooltip=[
                 alt.Tooltip("time_min:Q", title="Time [min]", format=".2f"),
                 alt.Tooltip("source_do2_percent:Q", title="DO2 [%]", format=".2f"),
@@ -1100,8 +1110,8 @@ def main() -> None:
         alt.Chart(sweep_df)
         .mark_line(point=True)
         .encode(
-            x=alt.X("flow_ml_min:Q", title="Flow [mL/min]"),
-            y=alt.Y("do_o2_out_percent:Q", title="DO outlet [%]"),
+            x=alt.X("flow_ml_min:Q", title="Flow [mL/min]", axis=alt.Axis(format=".1f")),
+            y=alt.Y("do_o2_out_percent:Q", title="DO outlet [%]", axis=alt.Axis(format=".1f")),
         )
         .properties(height=280)
     )
@@ -1117,8 +1127,8 @@ def main() -> None:
         alt.Chart(throughput_df)
         .mark_line(point=True)
         .encode(
-            x=alt.X("flow_ml_min:Q", title="Flow [mL/min]"),
-            y=alt.Y("value:Q", title="O2 throughput [mmol/min]"),
+            x=alt.X("flow_ml_min:Q", title="Flow [mL/min]", axis=alt.Axis(format=".1f")),
+            y=alt.Y("value:Q", title="O2 throughput [mmol/min]", axis=alt.Axis(format=".4f")),
             color=alt.Color("series:N", title="Series"),
         )
         .properties(height=320)
