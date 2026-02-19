@@ -3,6 +3,26 @@
 All meaningful changes to this project are tracked here.
 
 ## [Unreleased]
+- Date: `2026-02-17`
+- Summary: Added prepared experimental test matrix with model-predicted `DO2_out` values for planned lab validation runs.
+- Reason/Impact: Enables direct prediction-vs-measurement comparison across gas flow and perfusion settings with fixed assumptions and measurement fields.
+- Evidence: `docs/validation/ExperimentalTestMatrix_DO2_Outlet.md`
+- Date: `2026-02-17`
+- Summary: Updated experimental test matrix assumptions and predictions to pure O2 feed (`O2=100%`, `N2=0%`) with zero inlet dissolved gases (`DO2_in=0%`, `N2_in=0%`).
+- Reason/Impact: Aligns planned experiment sheet with intended start-up boundary condition challenge test before measurement campaign.
+- Evidence: `docs/validation/ExperimentalTestMatrix_DO2_Outlet.md`
+- Date: `2026-02-17`
+- Summary: Updated test matrix gas-flow range to constrained lab range (`1-20 mL/min`) and regenerated predicted `DO2_out` values.
+- Reason/Impact: Keeps planned validation runs inside practical gas-flow operating limits while preserving prediction-vs-measurement traceability.
+- Evidence: `docs/validation/ExperimentalTestMatrix_DO2_Outlet.md`
+- Date: `2026-02-17`
+- Summary: Updated matrix to a lower provisional pressure curve (`delta_p = 3.0 * gas_flow`) and added measured pressure-in fields.
+- Reason/Impact: Aligns predictions with observed pressure behavior (`20 mL/min ~= 60 mbar`) and improves capture of measured inlet conditions for comparison.
+- Evidence: `docs/validation/ExperimentalTestMatrix_DO2_Outlet.md`
+- Date: `2026-02-17`
+- Summary: Updated matrix to include perfusion-flow setpoints up to `20 mL/min` and restored standard `Conservative curve` (`delta_p = 4.0 * gas_flow`).
+- Reason/Impact: Aligns planned lab matrix with requested perfusion operating range while keeping consistency with current in-app conservative pressure model.
+- Evidence: `docs/validation/ExperimentalTestMatrix_DO2_Outlet.md`
 
 ## [0.1.0] - 2026-02-17
 - First stable research MVP release of CarboxySim.
