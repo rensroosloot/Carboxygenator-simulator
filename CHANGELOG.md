@@ -3,6 +3,10 @@
 All meaningful changes to this project are tracked here.
 
 ## [Unreleased]
+- Date: `2026-02-19`
+- Summary: Restricted project Python support range to `<4` in packaging metadata.
+- Reason/Impact: Fixes Streamlit Cloud Poetry dependency resolution failure for `reportlab` caused by open-ended Python range including unsupported future major versions.
+- Evidence: `pyproject.toml`, deployment log `logs-rensroosloot-carboxygenator-simulator-main-ui-app.py-2026-02-19T14_38_58.143Z.txt`
 - Date: `2026-02-17`
 - Summary: Added prepared experimental test matrix with model-predicted `DO2_out` values for planned lab validation runs.
 - Reason/Impact: Enables direct prediction-vs-measurement comparison across gas flow and perfusion settings with fixed assumptions and measurement fields.
