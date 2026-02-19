@@ -4,6 +4,10 @@ All meaningful changes to this project are tracked here.
 
 ## [Unreleased]
 - Date: `2026-02-19`
+- Summary: Added repository-root `sys.path` bootstrap in `ui/app.py` before importing `core`.
+- Reason/Impact: Prevents `ModuleNotFoundError` on Streamlit Cloud when app is launched with main module `ui/app.py` instead of repository-root entrypoint.
+- Evidence: `ui/app.py`, Streamlit Cloud traceback (`ModuleNotFoundError` at `from core import ...`)
+- Date: `2026-02-19`
 - Summary: Restricted project Python support range to `<4` in packaging metadata.
 - Reason/Impact: Fixes Streamlit Cloud Poetry dependency resolution failure for `reportlab` caused by open-ended Python range including unsupported future major versions.
 - Evidence: `pyproject.toml`, deployment log `logs-rensroosloot-carboxygenator-simulator-main-ui-app.py-2026-02-19T14_38_58.143Z.txt`
