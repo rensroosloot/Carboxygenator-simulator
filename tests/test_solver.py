@@ -3,10 +3,12 @@ from dataclasses import replace
 import numpy as np
 
 from core.model import (
+    compute_bicarbonate_buffer_ph,
     compute_equilibrium_concentrations,
     compute_effective_kla_from_permeability,
     compute_residence_time_s,
     compute_single_pass_outlet_concentration,
+    compute_two_stage_co2_outlet_concentration,
     compute_tube_volume_ml,
     constant_solubility_model,
 )
@@ -156,6 +158,20 @@ def test_effective_kla_from_permeability_is_positive() -> None:
     assert kla_n2 > 0.0
 
 
+def test_effective_kla_from_permeability_supports_co2() -> None:
+    inputs = replace(
+        _baseline_inputs(),
+        transfer_model="permeability",
+        tube_od_mm_override_mm=4.76,
+        perm_o2_mmol_m_per_m2_s_kpa=1.0e-9,
+        perm_n2_mmol_m_per_m2_s_kpa=2.0e-10,
+        co2_transfer_model="permeability",
+        perm_co2_mmol_m_per_m2_s_kpa=1.0e-9,
+    )
+    kla_co2 = compute_effective_kla_from_permeability("CO2", inputs, constant_solubility_model)
+    assert kla_co2 > 0.0
+
+
 def test_o2_gas_supply_limit_caps_outlet_transfer() -> None:
     base = replace(
         _baseline_inputs(),
@@ -220,3 +236,23 @@ def test_total_hold_up_volume_extends_startup_delay() -> None:
     assert np.isclose(default_delay.c_o2_mmol_l[500], default_delay.c_o2_mmol_l[-1])  # transfer visible by ~500s
     assert np.isclose(extended_delay.c_o2_mmol_l[500], base.c_o2_init_mmol_l)  # still delayed at ~500s
     assert np.isclose(extended_delay.c_o2_mmol_l[1000], extended_delay.c_o2_mmol_l[-1])  # transfer arrived by ~1000s
+
+
+def test_two_stage_co2_transfer_can_add_then_strip() -> None:
+    c_stage1, c_out = compute_two_stage_co2_outlet_concentration(
+        c_co2_in_mmol_l=0.5,
+        cstar_co2_stage1_mmol_l=2.0,
+        cstar_co2_stage2_mmol_l=0.0,
+        kla_co2_s_inv=0.05,
+        residence_time_stage1_s=30.0,
+        residence_time_stage2_s=120.0,
+    )
+    assert c_stage1 > 0.5
+    assert c_out < c_stage1
+    assert c_out >= 0.0
+
+
+def test_bicarbonate_ph_decreases_when_dissolved_co2_increases() -> None:
+    ph_low_co2 = compute_bicarbonate_buffer_ph(hco3_mmol_l=24.0, c_co2_mmol_l=0.8)
+    ph_high_co2 = compute_bicarbonate_buffer_ph(hco3_mmol_l=24.0, c_co2_mmol_l=1.6)
+    assert ph_high_co2 < ph_low_co2

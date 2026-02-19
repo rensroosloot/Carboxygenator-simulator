@@ -9,6 +9,8 @@ The tool is intended for engineering exploration, scenario comparison, and pre-l
 CarboxySim simulates:
 
 - single-pass dissolved gas transfer (O2/N2) through tubing
+- optional upstream CO2-conditioning section for bicarbonate pH control
+- optional stage-order reversal (DO section first, then pH section)
 - startup transport delay from total loop hold-up volume
 - gas-side O2 supply limitation
 - optional axial gas depletion (segmented counterflow model)
@@ -33,6 +35,7 @@ The 0.1.0 model assumes:
   - direct `kLa`
   - permeability-derived effective transfer coefficient
 - source vessel is perfectly mixed for recirculation estimate
+- optional pH estimate follows Henderson-Hasselbalch with fixed bicarbonate concentration
 - startup delay is governed by:
   - `transport_delay = total_hold_up_volume / perfusion_speed`
 
@@ -59,7 +62,14 @@ Important:
   - tubing divided into `n_segments`
   - gas composition updated segment-by-segment (counterflow effect)
 
-### 3.3 Pressure Model
+### 3.3 CO2 Transfer Model (pH Stage)
+
+- `Permeability` (default)
+  - user can enter `perm_co2` in `Barrer` or `mmol*m/(m2*s*kPa)`
+  - app derives effective CO2 transfer from geometry + solubility
+- `kLa`
+  - user enters `kla_co2_s_inv` directly
+### 3.4 Pressure Model
 
 - `Manual`
   - user sets `p_total_kpa`
@@ -94,6 +104,7 @@ The UI includes:
 - initialization:
   - inlet DO2%
   - inlet N2%
+  - inlet pH (converted internally to dissolved CO2 via bicarbonate relation)
   - target source DO2%
 - simulation horizon:
   - `t_end_min`
@@ -106,12 +117,14 @@ The UI includes:
 ## 5. Main Outputs
 
 - segmented counterflow visualization (when segmented mode is active)
+- one-row segmented CO2+pH and O2 visualization with selectable stage order
 - source vessel target panel:
   - start DO2
   - target DO2
   - estimated time to target
   - status
 - source vessel DO2 vs time plot
+- source vessel pH vs time plot (when CO2/pH workflow is enabled)
 - flow sweep:
   - outlet DO%
   - O2 throughput / net O2 added
@@ -171,10 +184,11 @@ If Excel/PDF dependencies are unavailable in deployment environment, app falls b
 
 ## 9. Local Setup
 
-From repository root:
+From repository root (project-local virtual environment):
 
 ```powershell
-python -m pip install -e .
+python -m venv .venv
+.\.venv\Scripts\python -m pip install streamlit numpy pandas altair openpyxl reportlab xlsxwriter pytest
 ```
 
 Run:
@@ -189,7 +203,7 @@ Windows helper:
 .\start_app.bat
 ```
 
-After startup, open the URL shown in terminal (usually `http://localhost:8501`).
+After startup, open the URL shown in terminal (commonly `http://localhost:8501` or `http://localhost:8502` if 8501 is occupied).
 
 ## 10. Testing
 

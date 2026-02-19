@@ -8,12 +8,12 @@
 
 ## 2. System Description
 - System name: `CarboxySim`
-- Intended use: Time-based 0D simulation of O2/N2 transfer into PBS.
+- Intended use: Time-based 0D simulation of O2/N2 transfer into PBS, with optional upstream CO2/pH-conditioning extension.
 
 ## 3. GAMP5 Classification
-- Category: `TBD` (expected: Category 5 custom application)
+- Category: `Category 5 (Custom application)`
 - Rationale:
-  - `TBD`
+  - CarboxySim contains custom-developed modeling logic, UI behavior, and validation artifacts specific to this research workflow.
 
 ## 4. Validation Strategy
 - Approach: Risk-based validation aligned to URS, DS, FS.

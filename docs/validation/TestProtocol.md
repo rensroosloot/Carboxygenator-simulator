@@ -25,6 +25,10 @@
 | TC-GAS-001 | Verify gas-side O2 supply limitation | UR-003b | AC-010 | Unit/integration | Lower gas flow caps O2 transfer compared with unrestricted case |
 | TC-SEG-001 | Verify segmented depletion behavior | UR-003c | AC-011 | Unit/integration | Segmented mode yields equal or lower O2 outlet than lumped under low gas flow |
 | TC-PRES-001 | Verify pressure-mode mapping from gas flow | UR-003d | AC-002, AC-003, AC-010 | Unit/UI | Conservative/optimistic pressure curves produce expected `p_total_kpa` values |
+| TC-CO2-001 | Verify two-stage CO2 conditioning then stripping behavior | UR-013 | AC-015 | Unit/integration | Stage-1 can increase CO2 and stage-2 can reduce it under zero-CO2 downstream gas assumption |
+| TC-CO2-002 | Verify bicarbonate pH trend versus dissolved CO2 | UR-013 | AC-016 | Unit test | Higher dissolved CO2 yields lower predicted pH for fixed bicarbonate |
+| TC-CO2-003 | Verify CO2 permeability-mode parameterization path | UR-013 | AC-017 | Unit test | CO2 permeability input is validated and yields positive effective `k_eff,CO2` |
+| TC-CO2-004 | Verify reverse stage-order behavior in CO2 path | UR-013 | AC-018 | Unit test | Enabling reverse-order changes final CO2 outcome versus default stage order |
 
 ## 4. Test Data
 - Baseline synthetic scenario from `docs/FS.md` Section 7.

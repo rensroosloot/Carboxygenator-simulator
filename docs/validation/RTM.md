@@ -23,6 +23,7 @@
 | UR-008 | AC-007 | TC-EXP-001 | TR-008 | Executed (Pass) | `tests/test_exports.py::test_ac007_export_integrity_csv_and_metadata_json` |
 | UR-009 | AC-004 | TC-VAL-001 | TR-001 | Executed (Pass) | `tests/test_params.py::test_validate_inputs_rejects_fraction_sum_outside_tolerance` |
 | UR-010 | AC-006 | TC-REP-001 | TR-010 | Executed (Pass) | `tests/test_solver.py::test_ac006_simulation_is_deterministic` |
+| UR-013 | AC-015, AC-016, AC-017, AC-018 | TC-CO2-001, TC-CO2-002, TC-CO2-003, TC-CO2-004 | TR-016, TR-017, TR-018, TR-019 | Executed (Pass) | `tests/test_solver.py::test_two_stage_co2_transfer_can_add_then_strip`, `tests/test_solver.py::test_bicarbonate_ph_decreases_when_dissolved_co2_increases`, `tests/test_solver.py::test_effective_kla_from_permeability_supports_co2`, `tests/test_ui_co2_stage_order.py::test_reverse_stage_order_changes_final_co2` |
 
 ## 3. Open Gaps
 - TR-015 (TC-PRES-001): pressure-mode verification not yet executed.

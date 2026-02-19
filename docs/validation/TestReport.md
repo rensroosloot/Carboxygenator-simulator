@@ -27,6 +27,10 @@
 | TR-013 | TC-GAS-001 | Pass | `python -m pytest -q` (21 passed) | Low gas flow caps O2 transfer relative to high-gas-flow case |
 | TR-014 | TC-SEG-001 | Pass | `python -m pytest -q` (23 passed) | Segmented depletion mode produces lower/equal O2 outlet than lumped under low gas flow |
 | TR-015 | TC-PRES-001 | TBD | TBD | Pressure-mode mapping verification pending |
+| TR-016 | TC-CO2-001 | Pass | `python -m pytest -q` (30 passed) | Optional two-stage CO2 model shows upstream conditioning and downstream stripping behavior |
+| TR-017 | TC-CO2-002 | Pass | `python -m pytest -q` (30 passed) | Bicarbonate pH estimate decreases as dissolved CO2 increases |
+| TR-018 | TC-CO2-003 | Pass | `python -m pytest -q` (32 passed) | CO2 permeability mode path validated with positive derived effective transfer coefficient |
+| TR-019 | TC-CO2-004 | Pass | `python -m pytest -q` (33 passed) | Reverse stage order changes final CO2 result versus default stage order |
 
 ## 4. Deviations
 | Deviation ID | Description | Impact | Resolution | Approved By |

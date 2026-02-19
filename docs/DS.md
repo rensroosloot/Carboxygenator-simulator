@@ -36,6 +36,17 @@ Modules:
   - `gas_liquid_model: str` (`"lumped"` or `"segmented"`)
   - `n_segments: int` (required `>=2` for segmented mode)
   - `total_hold_up_volume_ml: float | None` (optional override for startup transport delay)
+  - `enable_co2_ph_stage: bool` (optional upstream CO2 conditioning stage)
+  - `ph_tube_length_cm: float` (CO2-stage length)
+  - `ph_gas_co2_percent: float` (CO2 fraction in pH-stage gas)
+  - `ph_gas_flow_ml_min: float` (gas flow for pH-stage supply cap)
+  - `kla_co2_s_inv: float` (CO2 transfer coefficient)
+  - `co2_transfer_model: str` (`"kla"` or `"permeability"`)
+  - `perm_co2_mmol_m_per_m2_s_kpa: float | None` (required when `co2_transfer_model="permeability"`)
+  - `c_co2_init_mmol_l: float` (initial dissolved CO2 in source vessel)
+  - `hco3_mmol_l: float` (bicarbonate concentration for pH estimate)
+  - `pka_app: float` (apparent pKa for Henderson-Hasselbalch)
+  - `reverse_ph_do_flow: bool` (if true, apply DO section before pH section in CO2/pH path)
   - `c_o2_init_mmol_l: float`
   - `c_n2_init_mmol_l: float`
   - `t_end_s: float`
@@ -79,6 +90,13 @@ Validation rules:
   - optional override by `total_hold_up_volume_ml` to represent full loop hold-up
 - Time vector remains discrete (`n = floor(t_end/dt) + 1`) for visualization/export.
 - Deterministic behavior, no adaptive solver in MVP.
+- Optional CO2/pH extension:
+  - Stage 1 (upstream): CO2 transfer over `ph_tube_length_cm` toward CO2 gas equilibrium.
+  - Stage 2 (existing O2 section): CO2 stripping toward zero CO2 gas equilibrium.
+  - Optional reversed order: apply Stage 2 before Stage 1 for CO2/pH calculations.
+  - Source-vessel CO2 recirculation uses same delay/mixing form as DO estimate.
+  - pH estimate from bicarbonate buffer:
+    - `pH = pKa + log10([HCO3-]/[CO2*])`
 
 ## 4a. Report and Recommendation Layer
 - UI computes source-vessel DO trajectory using a perfect-mixing recirculation approximation with transport delay.

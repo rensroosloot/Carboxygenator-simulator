@@ -4,6 +4,74 @@ All meaningful changes to this project are tracked here.
 
 ## [Unreleased]
 - Date: `2026-02-19`
+- Summary: Added CO2 permeability parameterization option with `perm_co2` input (Barrer or SI-like) and selectable CO2 transfer model (`kLa` or `Permeability`).
+- Reason/Impact: Enables research-based CO2 transport specification directly from permeability data (e.g., 3250 Barrer) instead of relying only on manual CO2 `kLa`.
+- Evidence: `ui/app.py`, `core/params.py`, `core/model.py`, `tests/test_params.py`, `tests/test_solver.py`, `docs/URS.md`, `docs/DS.md`, `docs/FS.md`, `docs/validation/RTM.md`, `docs/validation/TestProtocol.md`, `docs/validation/TestReport.md`, `docs/validation/RiskAssessment.md`
+- Date: `2026-02-19`
+- Summary: Updated gas-transfer defaults to research-based PDMS benchmark values: `N2=280`, `O2=600`, `CO2=3250` Barrer basis; set default `kla_co2_s_inv` to `kla_o2 * (3250/600)`.
+- Reason/Impact: Aligns default CO2/O2/N2 transfer assumptions with the documented research basis instead of placeholder values.
+- Evidence: `ui/app.py`, `core/params.py`, `deep-research-report.md`
+- Date: `2026-02-19`
+- Summary: Made one-row segmented panel order follow stage order; in reverse mode O2 panel renders left and CO2/pH panel renders right.
+- Reason/Impact: Keeps visualization flow consistent with selected process direction.
+- Evidence: `ui/app.py`
+- Date: `2026-02-19`
+- Summary: Corrected CO2-panel `pH inlet` metric to show stage-local inlet pH in reverse mode (DO-output-fed pH stage).
+- Reason/Impact: Aligns displayed pH stage inputs with actual reverse-order calculation path.
+- Evidence: `ui/app.py`
+- Date: `2026-02-19`
+- Summary: Added `Reverse pH/DO stage order` toggle to apply DO-section CO2 stripping before pH-section CO2 conditioning (DO output feeds pH input).
+- Reason/Impact: Enables optional reversed process-order simulation and stage-order-aware pH/CO2 reporting without changing O2 transfer equations.
+- Evidence: `ui/app.py`, `core/params.py`
+- Date: `2026-02-19`
+- Summary: Hid `pH after DO part` metric when upstream pH stage is disabled.
+- Reason/Impact: Keeps O2 panel focused on DO-only outputs when pH workflow is not active.
+- Evidence: `ui/app.py`
+- Date: `2026-02-19`
+- Summary: Updated UI simulation defaults to `O2=100%`, `gas_flow_ml_min=2`, and `perfusion_speed_ml_min=4`.
+- Reason/Impact: Aligns startup defaults with requested pure-O2 low-gas-flow operating scenario.
+- Evidence: `ui/app.py`
+- Date: `2026-02-19`
+- Summary: Added explicit staged pH readout sequence in segmented view: `pH inlet`, `pH after pH part`, and `pH after DO part`.
+- Reason/Impact: Makes stage-by-stage pH progression visible and directly aligned with process order while preserving compact one-row panel layout.
+- Evidence: `ui/app.py`
+- Date: `2026-02-19`
+- Summary: Restored explicit inlet/outlet metrics above segmented panels: `DO2% inlet/outlet` for O2 section and `pH inlet/outlet` for CO2 pH stage.
+- Reason/Impact: Improves quick interpretation of stage entry/exit conditions alongside segmented heatmaps.
+- Evidence: `ui/app.py`
+- Date: `2026-02-19`
+- Summary: Changed CO2-stage segmented visualization density to use approximately one segment per cm of CO2-stage length.
+- Reason/Impact: Aligns CO2 panel granularity with short stage length (`16 cm` -> ~`16` segments) and avoids over-segmentation inherited from O2 defaults.
+- Evidence: `ui/app.py`
+- Date: `2026-02-19`
+- Summary: Adjusted one-row segmented visualization layout to fixed `25% CO2 / 75% O2` panel widths.
+- Reason/Impact: Improves readability of the CO2 panel while retaining side-by-side comparison with O2.
+- Evidence: `ui/app.py`
+- Date: `2026-02-19`
+- Summary: Reworked segmented counterflow layout to display CO2-stage and O2-stage heatmaps in one row with proportional widths based on section lengths.
+- Reason/Impact: Makes process-scale comparison explicit (`16 cm` CO2 stage vs `160 cm` O2 stage) and matches requested side-by-side visualization.
+- Evidence: `ui/app.py`
+- Date: `2026-02-19`
+- Summary: Updated CO2-stage segmented counterflow panel to use the same segment count density and chart height as the O2 segmented panel.
+- Reason/Impact: Aligns visual step width/style between CO2 and O2 segmented views for easier direct comparison.
+- Evidence: `ui/app.py`
+- Date: `2026-02-19`
+- Summary: Updated CO2 pH-stage defaults and UI emphasis: `ph_gas_co2_percent` default set to `99%`, with pH-first inlet/outlet metrics replacing CO2 in/out display.
+- Reason/Impact: Aligns default settings with high-CO2 pH-control use case and presents results in direct pH terms while keeping dissolved CO2 internal to calculations.
+- Evidence: `ui/app.py`
+- Date: `2026-02-19`
+- Summary: Added segmented counterflow visualization for the optional upstream CO2 pH-conditioning stage, including liquid CO2/gas CO2-potential lanes and liquid pH profile along stage position.
+- Reason/Impact: Improves interpretability of the CO2 pre-conditioning section and shows how CO2 transfer and pH evolve before the O2 section.
+- Evidence: `ui/app.py`
+- Date: `2026-02-19`
+- Summary: Replaced deprecated Streamlit `use_container_width` chart argument with `width=\"stretch\"` in UI chart rendering.
+- Reason/Impact: Removes Streamlit 1.54 deprecation warnings and keeps layout behavior unchanged for full-width charts.
+- Evidence: `ui/app.py`
+- Date: `2026-02-19`
+- Summary: Added optional upstream CO2 pH-conditioning section with bicarbonate-buffer pH simulation and downstream CO2 stripping in the existing O2 section.
+- Reason/Impact: Extends the tool to model a two-part process layout (CO2 then O2), adds pH/CO2 trend visualization and process schematic, and preserves existing O2/N2 workflow when the feature is disabled.
+- Evidence: `core/model.py`, `core/params.py`, `core/__init__.py`, `ui/app.py`, `tests/test_params.py`, `tests/test_solver.py`, `docs/URS.md`, `docs/DS.md`, `docs/FS.md`, `docs/validation/ValidationPlan.md`, `docs/validation/RiskAssessment.md`, `docs/validation/RTM.md`, `docs/validation/TestProtocol.md`, `docs/validation/TestReport.md`, `README.md`
+- Date: `2026-02-19`
 - Summary: Added repository-root `sys.path` bootstrap in `ui/app.py` before importing `core`.
 - Reason/Impact: Prevents `ModuleNotFoundError` on Streamlit Cloud when app is launched with main module `ui/app.py` instead of repository-root entrypoint.
 - Evidence: `ui/app.py`, Streamlit Cloud traceback (`ModuleNotFoundError` at `from core import ...`)

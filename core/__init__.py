@@ -2,12 +2,14 @@
 
 from .params import SimulationInputs, validate_inputs
 from .model import (
+    compute_bicarbonate_buffer_ph,
     compute_annulus_volume_ml,
     compute_equilibrium_concentrations,
     compute_effective_kla_from_permeability,
     compute_gas_o2_supply_rate_mmol_min,
     compute_residence_time_s,
     compute_single_pass_outlet_concentration,
+    compute_two_stage_co2_outlet_concentration,
     compute_tube_volume_ml,
     constant_solubility_model,
 )
@@ -20,11 +22,13 @@ __all__ = [
     "validate_inputs",
     "compute_equilibrium_concentrations",
     "compute_annulus_volume_ml",
+    "compute_bicarbonate_buffer_ph",
     "compute_effective_kla_from_permeability",
     "compute_gas_o2_supply_rate_mmol_min",
     "compute_tube_volume_ml",
     "compute_residence_time_s",
     "compute_single_pass_outlet_concentration",
+    "compute_two_stage_co2_outlet_concentration",
     "constant_solubility_model",
     "compute_single_pass_steady_outlet",
     "simulate",

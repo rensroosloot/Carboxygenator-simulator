@@ -11,6 +11,7 @@
 - Constant temperature.
 - No reactions/consumption in PBS.
 - Transfer may be represented either by direct `kLa_i` or by tubing permeability-derived effective `k_eff,i`.
+- Optional pH estimate uses a bicarbonate-buffer approximation with fixed `[HCO3-]` and `pKa`.
 
 ## 3. Equations
 For each species `i in {O2, N2}`:
@@ -40,6 +41,16 @@ For each species `i in {O2, N2}`:
 14. Cell-demand recommendation:
    - `O2_demand_mmol_min = N_cells * q_O2_cell(mol/cell/s) * 60 * 1000 * margin`
    - choose first flow where `o2_net_added_mmol_min >= O2_demand_mmol_min`
+15. Optional upstream CO2-conditioning stage and downstream stripping:
+   - Stage 1 (CO2 section): `C_CO2,after1 = C*_CO2,1 + (C_CO2,in - C*_CO2,1) * exp(-kLa_CO2 * tau_1)`
+   - Stage 2 (O2 section): `C_CO2,out = C*_CO2,2 + (C_CO2,after1 - C*_CO2,2) * exp(-kLa_CO2 * tau_2)`
+   - default downstream assumption: `C*_CO2,2 = 0` (no CO2 in O2-section gas feed)
+   - optional reverse-order mode: apply Stage 2 first, then Stage 1 (`DO -> pH`)
+16. Bicarbonate pH estimate:
+   - `pH = pKa_app + log10([HCO3-]/[CO2*])`
+17. CO2 transfer parameterization:
+   - `co2_transfer_model = kLa` uses direct `kla_co2`.
+   - `co2_transfer_model = permeability` derives effective `k_eff,CO2` from `perm_CO2`, geometry, and solubility (same formulation as O2/N2 permeability mode).
 
 Where:
 - `C_i,in`, `C_i,out` in `mmol/L`
@@ -102,6 +113,10 @@ Output interpretation:
 - AC-012 (hold-up delay): increasing total hold-up volume increases startup delay.
 - AC-013 (cell-demand recommendation): recommended flow is first sweep point meeting/exceeding demand, else explicit unmet warning.
 - AC-014 (report/export): Excel/JSON/PDF exports complete without runtime errors in supported environments.
+- AC-015 (CO2 two-stage behavior): optional CO2 stage can increase dissolved CO2 upstream and downstream O2 section can reduce CO2 versus post-stage value.
+- AC-016 (buffer pH response): increasing dissolved CO2 with fixed bicarbonate decreases predicted pH.
+- AC-017 (CO2 permeability mode): with `co2_transfer_model='permeability'`, CO2 permeability input is required and derived effective `k_eff,CO2` is positive.
+- AC-018 (CO2/DO reverse-order mode): when reverse-order is enabled, displayed pH/CO2 stage inlets/outlets follow `DO -> pH` ordering and use upstream stage output as downstream stage input.
 
 ## 7. Baseline Synthetic Scenario
 Use one canonical test scenario in FS appendix:
@@ -135,3 +150,4 @@ Expected behavior:
 | UR-010 | Reproducible outputs for identical inputs | AC-006 |
 | UR-011 | Set total hold-up volume and startup delay behavior | AC-012 |
 | UR-012 | Enter cell demand and obtain perfusion recommendation | AC-013 |
+| UR-013 | Optional upstream CO2 conditioning and pH/CO2 trend inspection | AC-015, AC-016, AC-017, AC-018 |

@@ -24,8 +24,12 @@ if str(REPO_ROOT) not in sys.path:
 
 from core import (
     SimulationInputs,
+    compute_bicarbonate_buffer_ph,
+    compute_effective_kla_from_permeability,
+    compute_gas_o2_supply_rate_mmol_min,
     compute_single_pass_steady_outlet,
     compute_tube_volume_ml,
+    compute_two_stage_co2_outlet_concentration,
     compute_equilibrium_concentrations,
     constant_solubility_model,
     simulate,
@@ -34,18 +38,20 @@ from core import (
 
 
 def _default_inputs() -> SimulationInputs:
+    co2_to_o2_perm_ratio = 3250.0 / 600.0
+    barrer_to_mmol_m_per_m2_s_kpa = 3.35e-10
     return SimulationInputs(
-        y_o2=0.50,
-        y_n2=0.50,
+        y_o2=1.00,
+        y_n2=0.00,
         p_total_kpa=101.325,
         temperature_c=37.0,
         volume_l=1.0,
-        flow_ml_min=2.0,
+        flow_ml_min=4.0,
         tube_id_mm=3.2,
         tube_od_mm=4.76,
         shell_id_mm=5.0,
         tube_length_cm=160.0,
-        gas_flow_ml_min=100.0,
+        gas_flow_ml_min=2.0,
         kla_o2_s_inv=0.01,
         kla_n2_s_inv=0.008,
         c_o2_init_mmol_l=0.0,
@@ -53,6 +59,17 @@ def _default_inputs() -> SimulationInputs:
         t_end_s=1800.0,
         dt_s=1.0,
         transfer_model="kla",
+        enable_co2_ph_stage=False,
+        ph_tube_length_cm=16.0,
+        ph_gas_co2_percent=99.0,
+        ph_gas_flow_ml_min=20.0,
+        kla_co2_s_inv=0.01 * co2_to_o2_perm_ratio,
+        co2_transfer_model="permeability",
+        perm_co2_mmol_m_per_m2_s_kpa=3250.0 * barrer_to_mmol_m_per_m2_s_kpa,
+        c_co2_init_mmol_l=1.2,
+        hco3_mmol_l=24.0,
+        pka_app=6.1,
+        reverse_ph_do_flow=False,
     )
 
 
@@ -304,6 +321,9 @@ def _build_pdf_report_bytes(
         "kLa N2 [1/s]": "First-order transfer rate to N2 equilibrium (kLa mode).",
         "Permeability O2 [mmol*m/(m2*s*kPa)]": "Wall permeability coefficient for O2 (permeability mode).",
         "Permeability N2 [mmol*m/(m2*s*kPa)]": "Wall permeability coefficient for N2 (permeability mode).",
+        "CO2 transfer model": "CO2 uses either direct kLa or permeability-derived effective transfer.",
+        "kLa CO2 [1/s]": "First-order transfer rate used when CO2 transfer model is kLa.",
+        "Permeability CO2 [mmol*m/(m2*s*kPa)]": "Wall permeability coefficient for CO2 when CO2 transfer model is permeability.",
         "Gas-liquid model": "Lumped uses one gas composition; segmented updates depletion along length.",
         "n_segments [-]": "Number of axial segments in segmented mode.",
         "Inlet DO2 [%]": "Starting dissolved oxygen in incoming liquid, relative to air/1atm reference.",
@@ -338,6 +358,13 @@ def _build_pdf_report_bytes(
             "Permeability N2 [mmol*m/(m2*s*kPa)]",
             "n/a" if inputs.perm_n2_mmol_m_per_m2_s_kpa is None else f"{inputs.perm_n2_mmol_m_per_m2_s_kpa:.3e}",
             setting_explanations["Permeability N2 [mmol*m/(m2*s*kPa)]"],
+        ],
+        ["CO2 transfer model", str(inputs.co2_transfer_model), setting_explanations["CO2 transfer model"]],
+        ["kLa CO2 [1/s]", f"{inputs.kla_co2_s_inv:.6g}", setting_explanations["kLa CO2 [1/s]"]],
+        [
+            "Permeability CO2 [mmol*m/(m2*s*kPa)]",
+            "n/a" if inputs.perm_co2_mmol_m_per_m2_s_kpa is None else f"{inputs.perm_co2_mmol_m_per_m2_s_kpa:.3e}",
+            setting_explanations["Permeability CO2 [mmol*m/(m2*s*kPa)]"],
         ],
         ["Gas-liquid model", str(inputs.gas_liquid_model), setting_explanations["Gas-liquid model"]],
         ["n_segments [-]", f"{int(inputs.n_segments)}", setting_explanations["n_segments [-]"]],
@@ -479,6 +506,232 @@ def _pressure_from_mode(
         delta_p_mbar = 6.4 * gas_flow_ml_min
         return p_atm_kpa + 0.1 * delta_p_mbar, delta_p_mbar
     raise ValueError(f"Unsupported pressure mode: {pressure_mode}")
+
+
+def _compute_two_stage_co2_outlet(inputs: SimulationInputs, c_co2_in_mmol_l: float) -> dict[str, float]:
+    """Compute dissolved CO2 at pH stage, DO stage, and final outlet according to selected stage order."""
+
+    kla_co2_eff_s_inv = (
+        compute_effective_kla_from_permeability("CO2", inputs, constant_solubility_model)
+        if inputs.co2_transfer_model == "permeability"
+        else inputs.kla_co2_s_inv
+    )
+    co2_sol = constant_solubility_model("CO2", inputs.temperature_c)
+    stage2_tube_volume_ml = compute_tube_volume_ml(inputs.tube_id_mm, inputs.tube_length_cm)
+    stage2_tau_s = (stage2_tube_volume_ml / max(inputs.flow_ml_min, 1e-15)) * 60.0
+    stage1_tube_volume_ml = compute_tube_volume_ml(inputs.tube_id_mm, inputs.ph_tube_length_cm)
+    stage1_tau_s = (stage1_tube_volume_ml / max(inputs.flow_ml_min, 1e-15)) * 60.0
+    y_co2_stage1 = inputs.ph_gas_co2_percent / 100.0
+    cstar_stage1 = co2_sol * y_co2_stage1 * inputs.p_total_kpa
+
+    def _apply_ph_stage(c_in: float) -> float:
+        if not inputs.enable_co2_ph_stage:
+            return c_in
+        c_after, _ = compute_two_stage_co2_outlet_concentration(
+            c_co2_in_mmol_l=c_in,
+            cstar_co2_stage1_mmol_l=cstar_stage1,
+            cstar_co2_stage2_mmol_l=cstar_stage1,
+            kla_co2_s_inv=kla_co2_eff_s_inv,
+            residence_time_stage1_s=stage1_tau_s,
+            residence_time_stage2_s=0.0,
+        )
+        co2_supply_rate_mmol_min = compute_gas_o2_supply_rate_mmol_min(
+            gas_flow_ml_min=inputs.ph_gas_flow_ml_min,
+            y_o2=y_co2_stage1,
+            p_total_kpa=inputs.p_total_kpa,
+            temperature_c=inputs.temperature_c,
+        )
+        co2_required_rate_mmol_min = max(
+            0.0,
+            (c_after - c_in) * (inputs.flow_ml_min / 1000.0),
+        )
+        if co2_required_rate_mmol_min > co2_supply_rate_mmol_min:
+            max_co2_delta_c = co2_supply_rate_mmol_min / max((inputs.flow_ml_min / 1000.0), 1e-15)
+            c_after = c_in + max_co2_delta_c
+        return c_after
+
+    def _apply_do_stage(c_in: float) -> float:
+        # Existing O2 section assumes no CO2 feed in gas, so this stage strips dissolved CO2.
+        _, c_after = compute_two_stage_co2_outlet_concentration(
+            c_co2_in_mmol_l=c_in,
+            cstar_co2_stage1_mmol_l=0.0,
+            cstar_co2_stage2_mmol_l=0.0,
+            kla_co2_s_inv=kla_co2_eff_s_inv,
+            residence_time_stage1_s=0.0,
+            residence_time_stage2_s=stage2_tau_s,
+        )
+        return c_after
+
+    if inputs.reverse_ph_do_flow:
+        c_after_do = _apply_do_stage(c_co2_in_mmol_l)
+        c_after_ph = _apply_ph_stage(c_after_do)
+        c_final = c_after_ph
+    else:
+        c_after_ph = _apply_ph_stage(c_co2_in_mmol_l)
+        c_after_do = _apply_do_stage(c_after_ph)
+        c_final = c_after_do
+
+    return {
+        "co2_after_ph_part_mmol_l": float(c_after_ph),
+        "co2_after_do_part_mmol_l": float(c_after_do),
+        "co2_final_outlet_mmol_l": float(c_final),
+    }
+
+
+def _simulate_source_vessel_ph_timeseries(
+    inputs: SimulationInputs,
+    t_end_s: float,
+    dt_s: float,
+) -> pd.DataFrame:
+    """Simulate source-vessel dissolved CO2 and pH with optional upstream CO2 conditioning."""
+
+    max_points = 1200
+    eff_dt_s = max(dt_s, t_end_s / max_points)
+    n_steps = int(np.floor(t_end_s / eff_dt_s)) + 1
+    time_s = np.arange(n_steps, dtype=float) * eff_dt_s
+
+    q_l_min = inputs.flow_ml_min / 1000.0
+    vessel_volume_l = max(inputs.volume_l, 1e-15)
+    c_co2 = float(inputs.c_co2_init_mmol_l)
+
+    transport_volume_ml = (
+        float(inputs.total_hold_up_volume_ml)
+        if inputs.total_hold_up_volume_ml is not None
+        else compute_tube_volume_ml(inputs.tube_id_mm, inputs.tube_length_cm)
+    )
+    transport_delay_s = (transport_volume_ml / max(inputs.flow_ml_min, 1e-15)) * 60.0
+    delay_steps = max(0, int(round(transport_delay_s / max(eff_dt_s, 1e-12))))
+    out_hist_co2: deque[float] = deque([c_co2] * (delay_steps + 1), maxlen=delay_steps + 1)
+
+    rows = [
+        {
+            "time_s": 0.0,
+            "time_min": 0.0,
+            "source_co2_mmol_l": c_co2,
+            "source_ph": compute_bicarbonate_buffer_ph(
+                hco3_mmol_l=inputs.hco3_mmol_l,
+                c_co2_mmol_l=c_co2,
+                pka_app=inputs.pka_app,
+            ),
+        }
+    ]
+    dt_min = eff_dt_s / 60.0
+
+    for step in range(1, n_steps):
+        co2_stage_result = _compute_two_stage_co2_outlet(inputs=inputs, c_co2_in_mmol_l=c_co2)
+        c_co2_out = float(co2_stage_result["co2_final_outlet_mmol_l"])
+        delayed_out_co2 = out_hist_co2[0]
+        out_hist_co2.append(c_co2_out)
+
+        dc_co2_dt = (q_l_min / vessel_volume_l) * (delayed_out_co2 - c_co2)
+        c_co2 += dc_co2_dt * dt_min
+
+        t_s = float(time_s[step])
+        rows.append(
+            {
+                "time_s": t_s,
+                "time_min": t_s / 60.0,
+                "source_co2_mmol_l": c_co2,
+                "source_ph": compute_bicarbonate_buffer_ph(
+                    hco3_mmol_l=inputs.hco3_mmol_l,
+                    c_co2_mmol_l=c_co2,
+                    pka_app=inputs.pka_app,
+                ),
+            }
+        )
+
+    return pd.DataFrame(rows)
+
+
+def _compute_co2_stage_segment_profiles(
+    inputs: SimulationInputs,
+    c_co2_in_mmol_l: float,
+    n_segments: int,
+) -> dict[str, list[float] | bool]:
+    """Compute segmented counterflow profiles for the upstream CO2 conditioning stage."""
+
+    nseg = max(2, int(n_segments))
+    tube_volume_ml = compute_tube_volume_ml(inputs.tube_id_mm, inputs.ph_tube_length_cm)
+    residence_time_s = (tube_volume_ml / max(inputs.flow_ml_min, 1e-15)) * 60.0
+    dt_seg_s = residence_time_s / nseg
+    kla_co2_eff_s_inv = (
+        compute_effective_kla_from_permeability("CO2", inputs, constant_solubility_model)
+        if inputs.co2_transfer_model == "permeability"
+        else inputs.kla_co2_s_inv
+    )
+    a_co2 = 1.0 - np.exp(-kla_co2_eff_s_inv * dt_seg_s)
+
+    temperature_k = inputs.temperature_c + 273.15
+    r_kpa_l_per_mol_k = 8.314462618
+    gas_conc_mmol_l = (inputs.p_total_kpa / (r_kpa_l_per_mol_k * temperature_k)) * 1000.0
+    y_co2_inlet = inputs.ph_gas_co2_percent / 100.0
+    total_gas_mmol_min = (inputs.ph_gas_flow_ml_min / 1000.0) * gas_conc_mmol_l
+    n_co2_inlet_mmol_min = total_gas_mmol_min * y_co2_inlet
+    n_other_inlet_mmol_min = total_gas_mmol_min * (1.0 - y_co2_inlet)
+    q_liq_l_min = inputs.flow_ml_min / 1000.0
+    sol_co2 = constant_solubility_model("CO2", inputs.temperature_c)
+
+    # Gas interfaces indexed left->right, gas inlet at right boundary (counterflow).
+    iface_co2 = [n_co2_inlet_mmol_min for _ in range(nseg + 1)]
+    iface_other = [n_other_inlet_mmol_min for _ in range(nseg + 1)]
+    c_liq = [0.0 for _ in range(nseg + 1)]
+    c_liq[0] = c_co2_in_mmol_l
+
+    limited_hit = False
+    for _ in range(50):
+        prev_iface_co2 = iface_co2.copy()
+        c_liq[0] = c_co2_in_mmol_l
+        tr_co2 = [0.0 for _ in range(nseg)]
+
+        for seg in range(nseg):
+            gas_co2_in = prev_iface_co2[seg + 1]
+            gas_other_in = iface_other[seg + 1]
+            gas_total_in = max(gas_co2_in + gas_other_in, 1e-15)
+            y_co2_local = max(0.0, min(1.0, gas_co2_in / gas_total_in))
+            cstar_local = sol_co2 * y_co2_local * inputs.p_total_kpa
+
+            dc_co2 = (cstar_local - c_liq[seg]) * a_co2
+            seg_tr_co2 = dc_co2 * q_liq_l_min
+
+            # Gas-to-liquid absorption cannot exceed available upstream CO2 gas flow in segment.
+            if seg_tr_co2 > gas_co2_in:
+                limited_hit = True
+                seg_tr_co2 = gas_co2_in
+                dc_co2 = seg_tr_co2 / max(q_liq_l_min, 1e-15)
+
+            tr_co2[seg] = seg_tr_co2
+            c_liq[seg + 1] = c_liq[seg] + dc_co2
+
+        iface_co2[nseg] = n_co2_inlet_mmol_min
+        iface_other[nseg] = n_other_inlet_mmol_min
+        for seg in range(nseg - 1, -1, -1):
+            iface_co2[seg] = max(0.0, iface_co2[seg + 1] - tr_co2[seg])
+            iface_other[seg] = iface_other[seg + 1]
+
+        diff = max(abs(a - b) for a, b in zip(iface_co2, prev_iface_co2))
+        if diff < 1e-9:
+            break
+
+    gas_profile_cstar_co2 = []
+    for seg in range(nseg):
+        gtot = max(iface_co2[seg + 1] + iface_other[seg + 1], 1e-15)
+        y_co2_seg = iface_co2[seg + 1] / gtot
+        gas_profile_cstar_co2.append(sol_co2 * y_co2_seg * inputs.p_total_kpa)
+    liq_profile_ph = [
+        compute_bicarbonate_buffer_ph(
+            hco3_mmol_l=inputs.hco3_mmol_l,
+            c_co2_mmol_l=max(c_val, 1e-12),
+            pka_app=inputs.pka_app,
+        )
+        for c_val in c_liq
+    ]
+
+    return {
+        "liq_profile_co2_mmol_l": [float(v) for v in c_liq],
+        "gas_profile_cstar_co2_mmol_l": [float(v) for v in gas_profile_cstar_co2],
+        "liq_profile_ph": [float(v) for v in liq_profile_ph],
+        "co2_transfer_limited": limited_hit,
+    }
 
 
 def _estimate_time_to_target_do_source_vessel(
@@ -655,6 +908,110 @@ def main() -> None:
             step=0.1,
             help="Source vessel volume. Kept for context/metadata in single-pass mode.",
         )
+        enable_co2_ph_stage = st.checkbox(
+            "Enable upstream CO2 pH stage",
+            value=defaults.enable_co2_ph_stage,
+            help="Optional 16 cm (default) section before O2 tubing for bicarbonate pH conditioning with CO2.",
+        )
+        reverse_ph_do_flow = st.checkbox(
+            "Reverse pH/DO stage order",
+            value=defaults.reverse_ph_do_flow,
+            help="When enabled, CO2/pH calculations apply DO section first, then pH section (DO output feeds pH part).",
+        )
+        ph_tube_length_cm = st.number_input(
+            "ph_tube_length_cm [cm]",
+            min_value=0.001,
+            value=defaults.ph_tube_length_cm,
+            step=1.0,
+            disabled=(not enable_co2_ph_stage),
+            help="Length of upstream CO2 conditioning tubing section.",
+        )
+        ph_gas_co2_percent = st.number_input(
+            "ph_gas_co2_percent [%]",
+            min_value=0.0,
+            max_value=100.0,
+            value=defaults.ph_gas_co2_percent,
+            step=0.5,
+            disabled=(not enable_co2_ph_stage),
+            help="CO2 fraction in gas used for upstream pH-conditioning section.",
+        )
+        ph_gas_flow_ml_min = st.number_input(
+            "ph_gas_flow_ml_min [mL/min]",
+            min_value=0.001,
+            value=defaults.ph_gas_flow_ml_min,
+            step=1.0,
+            disabled=(not enable_co2_ph_stage),
+            help="Gas flow for upstream CO2-conditioning section.",
+        )
+        co2_transfer_model_ui = st.selectbox(
+            "CO2 transfer model",
+            options=["Permeability", "kLa"],
+            index=0 if defaults.co2_transfer_model == "permeability" else 1,
+            help="Choose permeability-based CO2 transfer (with Barrer/SI input) or direct kLa input.",
+        )
+        co2_transfer_model = "permeability" if co2_transfer_model_ui == "Permeability" else "kla"
+        if co2_transfer_model == "permeability":
+            co2_perm_unit = st.selectbox(
+                "CO2 permeability unit",
+                options=["Barrer", "mmol*m/(m2*s*kPa)"],
+                index=0,
+                help="Choose the unit used by your CO2 tubing permeability source.",
+            )
+            if co2_perm_unit == "Barrer":
+                perm_co2_barrer = st.number_input(
+                    "perm_co2 [Barrer]",
+                    min_value=0.0,
+                    value=3250.0,
+                    step=50.0,
+                    help="CO2 permeability benchmark/reference in Barrer.",
+                )
+                barrer_to_mmol_m_per_m2_s_kpa = 3.35e-10
+                perm_co2 = perm_co2_barrer * barrer_to_mmol_m_per_m2_s_kpa
+            else:
+                perm_co2 = st.number_input(
+                    "perm_co2 [mmol*m/(m2*s*kPa)]",
+                    min_value=0.0,
+                    value=float(defaults.perm_co2_mmol_m_per_m2_s_kpa or (3250.0 * 3.35e-10)),
+                    step=1.0e-8,
+                    format="%.3e",
+                    help="CO2 permeability coefficient in SI-like unit.",
+                )
+            st.caption(f"Converted CO2 permeability: {perm_co2:.3e} mmol*m/(m2*s*kPa)")
+            kla_co2_s_inv = defaults.kla_co2_s_inv
+        else:
+            kla_co2_s_inv = st.number_input(
+                "kla_co2_s_inv [1/s]",
+                min_value=0.0,
+                value=defaults.kla_co2_s_inv,
+                step=0.001,
+                format="%.6f",
+                help="CO2 transfer coefficient used for pH-conditioning and downstream CO2 stripping.",
+            )
+            perm_co2 = None
+        hco3_mmol_l = st.number_input(
+            "hco3_mmol_l [mmol/L]",
+            min_value=0.0001,
+            value=defaults.hco3_mmol_l,
+            step=1.0,
+            help="Bicarbonate buffer concentration used for Henderson-Hasselbalch pH estimate.",
+        )
+        pka_app = st.number_input(
+            "pka_app [-]",
+            min_value=0.0,
+            value=defaults.pka_app,
+            step=0.05,
+            help="Apparent pKa used in pH = pKa + log10([HCO3-]/[CO2*]).",
+        )
+        inlet_ph = st.number_input(
+            "inlet_ph [-]",
+            min_value=0.0,
+            max_value=14.0,
+            value=7.40,
+            step=0.05,
+            help="Initial source-vessel pH converted to dissolved CO2 via Henderson-Hasselbalch.",
+        )
+        c_co2_init_mmol_l = hco3_mmol_l / max(10.0 ** (inlet_ph - pka_app), 1e-12)
+        st.caption("Dissolved CO2 is derived internally from inlet pH and bicarbonate.")
         c_o2_ref_mmol_l, c_n2_ref_mmol_l = _reference_concentrations_mmol_l(temperature_c)
         c_o2_init_percent = st.number_input(
             "inlet_do2_percent [%]",
@@ -821,7 +1178,7 @@ def main() -> None:
                 perm_n2_barrer = st.number_input(
                     "perm_n2 [Barrer]",
                     min_value=0.0,
-                    value=300.0,
+                    value=280.0,
                     step=10.0,
                     help="N2 permeability from datasheet in Barrer.",
                 )
@@ -897,6 +1254,8 @@ def main() -> None:
     st.write("- Single-pass tubing transfer from source to waste")
     st.write("- Constant gas composition, pressure, and temperature")
     st.write("- No reactions in PBS")
+    st.write("- Optional bicarbonate pH estimate uses Henderson-Hasselbalch with fixed [HCO3-] and pKa")
+    st.write("- CO2 in downstream O2 section is assumed absent in gas phase (CO2 stripping driver)")
 
     candidate_inputs = SimulationInputs(
         y_o2=y_o2,
@@ -923,6 +1282,17 @@ def main() -> None:
         gas_liquid_model=gas_liquid_model,
         n_segments=n_segments,
         total_hold_up_volume_ml=total_hold_up_volume_ml,
+        enable_co2_ph_stage=enable_co2_ph_stage,
+        ph_tube_length_cm=ph_tube_length_cm,
+        ph_gas_co2_percent=ph_gas_co2_percent,
+        ph_gas_flow_ml_min=ph_gas_flow_ml_min,
+        kla_co2_s_inv=kla_co2_s_inv,
+        co2_transfer_model=co2_transfer_model,
+        perm_co2_mmol_m_per_m2_s_kpa=perm_co2,
+        c_co2_init_mmol_l=c_co2_init_mmol_l,
+        hco3_mmol_l=hco3_mmol_l,
+        pka_app=pka_app,
+        reverse_ph_do_flow=reverse_ph_do_flow,
     )
 
     should_run = run
@@ -980,72 +1350,252 @@ def main() -> None:
     o2_outlet_rate_mmol_min = float(outputs.c_o2_mmol_l[-1]) * flow_l_min
     o2_inlet_rate_mmol_min = float(inputs.c_o2_init_mmol_l) * flow_l_min
     o2_added_rate_mmol_min = o2_outlet_rate_mmol_min - o2_inlet_rate_mmol_min
+    co2_stage_result = _compute_two_stage_co2_outlet(inputs=inputs, c_co2_in_mmol_l=inputs.c_co2_init_mmol_l)
+    c_co2_after_ph_part_mmol_l = float(co2_stage_result["co2_after_ph_part_mmol_l"])
+    c_co2_after_do_part_mmol_l = float(co2_stage_result["co2_after_do_part_mmol_l"])
+    c_co2_outlet_mmol_l = float(co2_stage_result["co2_final_outlet_mmol_l"])
+    inlet_ph_value = compute_bicarbonate_buffer_ph(
+        hco3_mmol_l=inputs.hco3_mmol_l,
+        c_co2_mmol_l=inputs.c_co2_init_mmol_l,
+        pka_app=inputs.pka_app,
+    )
+    ph_after_stage1 = compute_bicarbonate_buffer_ph(
+        hco3_mmol_l=inputs.hco3_mmol_l,
+        c_co2_mmol_l=c_co2_after_ph_part_mmol_l,
+        pka_app=inputs.pka_app,
+    )
+    ph_after_do_part = compute_bicarbonate_buffer_ph(
+        hco3_mmol_l=inputs.hco3_mmol_l,
+        c_co2_mmol_l=c_co2_after_do_part_mmol_l,
+        pka_app=inputs.pka_app,
+    )
+    ph_outlet = compute_bicarbonate_buffer_ph(
+        hco3_mmol_l=inputs.hco3_mmol_l,
+        c_co2_mmol_l=c_co2_outlet_mmol_l,
+        pka_app=inputs.pka_app,
+    )
 
-    st.markdown("### Segmented Counterflow Visualization")
-    if outputs.metadata.get("gas_liquid_model") == "segmented":
-        liq_profile = outputs.metadata.get("liq_profile_o2_mmol_l", [])
-        gas_profile = outputs.metadata.get("gas_profile_y_o2", [])
-        if len(liq_profile) >= 2 and len(gas_profile) >= 1:
-            left_col, center_col, right_col = st.columns([1, 6, 1])
-            left_col.metric("DO2% inlet", f"{do_percent[0]:.2f}%")
-            right_col.metric("DO2% outlet", f"{do_percent[-1]:.2f}%")
-            nseg = len(gas_profile)
-            seg_rows = []
-            for seg in range(nseg):
-                x0 = seg / nseg
-                x1 = (seg + 1) / nseg
-                liq_do_seg = (((liq_profile[seg] + liq_profile[seg + 1]) * 0.5) / do_ref_o2_mmol_l) * 100.0
-                gas_do_potential_seg = (
-                    (gas_profile[seg] * inputs.p_total_kpa) / (0.21 * 101.325)
-                ) * 100.0
-                seg_rows.append(
+    st.markdown(
+        "### Process Schematic (O2 then CO2)"
+        if inputs.reverse_ph_do_flow
+        else "### Process Schematic (CO2 then O2)"
+    )
+    if inputs.reverse_ph_do_flow:
+        process_rows = [
+            {
+                "zone": "O2 stage",
+                "x0": 0.0,
+                "x1": float(inputs.tube_length_cm),
+                "label": f"O2 stage ({inputs.tube_length_cm:.0f} cm)",
+                "enabled": "",
+            },
+            {
+                "zone": "Break",
+                "x0": float(inputs.tube_length_cm),
+                "x1": float(inputs.tube_length_cm + 8.0),
+                "label": "Connection break",
+                "enabled": "",
+            },
+            {
+                "zone": "CO2 pH stage",
+                "x0": float(inputs.tube_length_cm + 8.0),
+                "x1": float(inputs.tube_length_cm + 8.0 + inputs.ph_tube_length_cm),
+                "label": f"CO2 stage ({inputs.ph_tube_length_cm:.0f} cm)",
+                "enabled": "Enabled" if inputs.enable_co2_ph_stage else "Disabled",
+            },
+        ]
+    else:
+        process_rows = [
+            {
+                "zone": "CO2 pH stage",
+                "x0": 0.0,
+                "x1": float(inputs.ph_tube_length_cm),
+                "label": f"CO2 stage ({inputs.ph_tube_length_cm:.0f} cm)",
+                "enabled": "Enabled" if inputs.enable_co2_ph_stage else "Disabled",
+            },
+            {
+                "zone": "Break",
+                "x0": float(inputs.ph_tube_length_cm),
+                "x1": float(inputs.ph_tube_length_cm + 8.0),
+                "label": "Connection break",
+                "enabled": "",
+            },
+            {
+                "zone": "O2 stage",
+                "x0": float(inputs.ph_tube_length_cm + 8.0),
+                "x1": float(inputs.ph_tube_length_cm + 8.0 + inputs.tube_length_cm),
+                "label": f"O2 stage ({inputs.tube_length_cm:.0f} cm)",
+                "enabled": "",
+            },
+        ]
+    process_df = pd.DataFrame(process_rows)
+    process_chart = (
+        alt.Chart(process_df)
+        .mark_rect(stroke="#202a3c", strokeWidth=1.0)
+        .encode(
+            x=alt.X("x0:Q", title="Axial position [cm]"),
+            x2="x1:Q",
+            y=alt.value(20),
+            color=alt.Color(
+                "zone:N",
+                scale=alt.Scale(
+                    domain=["CO2 pH stage", "Break", "O2 stage"],
+                    range=["#1e7f6d", "#5a6375", "#2f6db0"],
+                ),
+                legend=alt.Legend(title="Section"),
+            ),
+            tooltip=[
+                alt.Tooltip("label:N", title="Section"),
+                alt.Tooltip("enabled:N", title="Status"),
+            ],
+        )
+        .properties(height=120)
+    )
+    st.altair_chart(process_chart, width="stretch")
+
+    st.markdown("### Segmented Counterflow Visualization (CO2 + O2 in One Row)")
+    if inputs.reverse_ph_do_flow:
+        panel_col_o2, panel_col_co2 = st.columns([3, 1], gap="small")
+    else:
+        panel_col_co2, panel_col_o2 = st.columns([1, 3], gap="small")
+
+    with panel_col_co2:
+        st.caption(f"CO2 pH stage ({inputs.ph_tube_length_cm:.0f} cm)")
+        if inputs.enable_co2_ph_stage:
+            ph_in_to_ph_part = ph_after_do_part if inputs.reverse_ph_do_flow else inlet_ph_value
+            co2_m1, co2_m2 = st.columns(2)
+            co2_m1.metric("pH inlet", f"{ph_in_to_ph_part:.2f}")
+            co2_m2.metric("pH after pH part", f"{ph_after_stage1:.2f}")
+            nseg_co2 = max(2, int(round(inputs.ph_tube_length_cm)))
+            co2_stage_input = c_co2_after_do_part_mmol_l if inputs.reverse_ph_do_flow else inputs.c_co2_init_mmol_l
+            co2_profiles = _compute_co2_stage_segment_profiles(
+                inputs=inputs,
+                c_co2_in_mmol_l=co2_stage_input,
+                n_segments=nseg_co2,
+            )
+            co2_liq_profile = co2_profiles["liq_profile_co2_mmol_l"]
+            co2_gas_profile = co2_profiles["gas_profile_cstar_co2_mmol_l"]
+            co2_rows = []
+            for seg in range(nseg_co2):
+                x0 = seg / nseg_co2
+                x1 = (seg + 1) / nseg_co2
+                co2_rows.append(
                     {
-                        "lane": "Liquid DO% (left -> right flow)",
+                        "lane": "Liquid CO2*",
                         "x0": x0,
                         "x1": x1,
-                        "value": float(liq_do_seg),
+                        "value": float((co2_liq_profile[seg] + co2_liq_profile[seg + 1]) * 0.5),
                     }
                 )
-                seg_rows.append(
+                co2_rows.append(
                     {
-                        "lane": "Gas O2 potential% (right -> left flow)",
+                        "lane": "Gas CO2 potential C*",
                         "x0": x0,
                         "x1": x1,
-                        "value": float(gas_do_potential_seg),
+                        "value": float(co2_gas_profile[seg]),
                     }
                 )
-            seg_df = pd.DataFrame(seg_rows)
-            seg_chart = (
-                alt.Chart(seg_df)
+            co2_df = pd.DataFrame(co2_rows)
+            co2_vmin = float(co2_df["value"].min())
+            co2_vmax = float(co2_df["value"].max())
+            if abs(co2_vmax - co2_vmin) < 1e-12:
+                co2_vmax = co2_vmin + 1.0
+            co2_seg_chart = (
+                alt.Chart(co2_df)
                 .mark_rect()
                 .encode(
-                    x=alt.X("x0:Q", title="Normalized tube position (0 = liquid inlet, 1 = liquid outlet)"),
+                    x=alt.X("x0:Q", title="Normalized position"),
                     x2="x1:Q",
-                    y=alt.Y("lane:N", title="Segment bar"),
+                    y=alt.Y("lane:N", title=""),
                     color=alt.Color(
                         "value:Q",
-                        title="Color scale [% DO equivalent]",
+                        title="[mmol/L]",
                         scale=alt.Scale(
-                            domain=[0, 100, 250, 500],
-                            range=["#d73027", "#fdae61", "#74add1", "#313695"],
+                            domain=[co2_vmin, co2_vmax],
+                            range=["#7f1d1d", "#f97316", "#60a5fa", "#1d4ed8"],
                         ),
                     ),
                     tooltip=[
                         alt.Tooltip("lane:N", title="Lane"),
-                        alt.Tooltip("value:Q", title="Value [%]", format=".2f"),
+                        alt.Tooltip("value:Q", title="Value [mmol/L]", format=".4f"),
                     ],
                 )
                 .properties(height=360)
             )
-            st.caption(
-                "Color legend: 0% DO = red (low O2), 500% DO = blue (high O2). "
-                "Liquid flows left->right, gas flows right->left."
-            )
-            center_col.altair_chart(seg_chart, use_container_width=True)
+            st.altair_chart(co2_seg_chart, width="stretch")
+            st.caption(f"CO2* in: {co2_stage_input:.3f}, out: {c_co2_after_ph_part_mmol_l:.3f} mmol/L")
         else:
-            st.info("No segmented profile data available in last run.")
-    else:
-        st.info("Run with `Gas-liquid coupling = Segmented depletion` and click `Run Simulation` to show this view.")
+            st.info("Enable CO2 stage to show CO2 segmented counterflow.")
+
+    with panel_col_o2:
+        st.caption(f"O2 section ({inputs.tube_length_cm:.0f} cm)")
+        if outputs.metadata.get("gas_liquid_model") == "segmented":
+            liq_profile = outputs.metadata.get("liq_profile_o2_mmol_l", [])
+            gas_profile = outputs.metadata.get("gas_profile_y_o2", [])
+            if len(liq_profile) >= 2 and len(gas_profile) >= 1:
+                if inputs.enable_co2_ph_stage:
+                    o2_m1, o2_m2, o2_m3 = st.columns(3)
+                    o2_m1.metric("DO2% inlet", f"{do_percent[0]:.2f}%")
+                    o2_m2.metric("DO2% outlet", f"{do_percent[-1]:.2f}%")
+                    o2_m3.metric("pH after DO part", f"{ph_after_do_part:.2f}")
+                else:
+                    o2_m1, o2_m2 = st.columns(2)
+                    o2_m1.metric("DO2% inlet", f"{do_percent[0]:.2f}%")
+                    o2_m2.metric("DO2% outlet", f"{do_percent[-1]:.2f}%")
+                nseg = len(gas_profile)
+                seg_rows = []
+                for seg in range(nseg):
+                    x0 = seg / nseg
+                    x1 = (seg + 1) / nseg
+                    liq_do_seg = (((liq_profile[seg] + liq_profile[seg + 1]) * 0.5) / do_ref_o2_mmol_l) * 100.0
+                    gas_do_potential_seg = (
+                        (gas_profile[seg] * inputs.p_total_kpa) / (0.21 * 101.325)
+                    ) * 100.0
+                    seg_rows.append(
+                        {
+                            "lane": "Liquid DO%",
+                            "x0": x0,
+                            "x1": x1,
+                            "value": float(liq_do_seg),
+                        }
+                    )
+                    seg_rows.append(
+                        {
+                            "lane": "Gas O2 potential%",
+                            "x0": x0,
+                            "x1": x1,
+                            "value": float(gas_do_potential_seg),
+                        }
+                    )
+                seg_df = pd.DataFrame(seg_rows)
+                seg_chart = (
+                    alt.Chart(seg_df)
+                    .mark_rect()
+                    .encode(
+                        x=alt.X("x0:Q", title="Normalized position"),
+                        x2="x1:Q",
+                        y=alt.Y("lane:N", title=""),
+                        color=alt.Color(
+                            "value:Q",
+                            title="[% DO eq]",
+                            scale=alt.Scale(
+                                domain=[0, 100, 250, 500],
+                                range=["#d73027", "#fdae61", "#74add1", "#313695"],
+                            ),
+                        ),
+                        tooltip=[
+                            alt.Tooltip("lane:N", title="Lane"),
+                            alt.Tooltip("value:Q", title="Value [%]", format=".2f"),
+                        ],
+                    )
+                    .properties(height=360)
+                )
+                st.altair_chart(seg_chart, width="stretch")
+                st.caption(f"DO2 inlet: {do_percent[0]:.2f}%, outlet: {do_percent[-1]:.2f}%")
+            else:
+                st.info("No segmented profile data available in last run.")
+        else:
+            st.info("Run with `Gas-liquid coupling = Segmented depletion` to show O2 segmented counterflow.")
 
     reached_target, target_time_s, final_pred_do_percent = _estimate_time_to_target_do_source_vessel(
         inputs=inputs,
@@ -1090,8 +1640,53 @@ def main() -> None:
         )
         .properties(height=260)
     )
-    st.altair_chart(source_chart, use_container_width=True)
+    st.altair_chart(source_chart, width="stretch")
     st.caption("Source-vessel plot is adaptively downsampled for performance on long time windows.")
+
+    st.markdown("### pH (Bicarbonate Buffer)")
+    pcol1, pcol2, pcol3 = st.columns(3)
+    pcol1.metric("Inlet pH [-]", f"{inlet_ph_value:.2f}")
+    pcol2.metric("After pH part pH [-]", f"{ph_after_stage1:.2f}")
+    pcol3.metric("After DO part pH [-]", f"{ph_after_do_part:.2f}")
+    pcol1.metric("pH shift in pH part [-]", f"{(ph_after_stage1 - inlet_ph_value):.3f}")
+    pcol2.metric("pH shift in DO part [-]", f"{(ph_after_do_part - ph_after_stage1):.3f}")
+    pcol3.metric("Net pH shift inlet->outlet [-]", f"{(ph_outlet - inlet_ph_value):.3f}")
+    if inputs.enable_co2_ph_stage:
+        if inputs.reverse_ph_do_flow:
+            st.caption(
+                "Reverse order active: DO section is applied first (CO2 stripping), then pH-conditioning section "
+                "(CO2 addition), so DO-stage output is used as pH-stage input."
+            )
+        else:
+            st.caption(
+                "Default order: CO2 rises in the upstream pH-conditioning section and can be stripped in the "
+                "downstream O2 section because downstream gas-phase CO2 is assumed 0%."
+            )
+    else:
+        st.caption(
+            "CO2 pH stage disabled: only downstream O2 section stripping is applied to dissolved CO2."
+        )
+
+    ph_series_df = _simulate_source_vessel_ph_timeseries(
+        inputs=inputs,
+        t_end_s=source_plot_t_end_s,
+        dt_s=inputs.dt_s,
+    )
+    ph_chart = (
+        alt.Chart(ph_series_df)
+        .mark_line(color="#86efac")
+        .encode(
+            x=alt.X("time_min:Q", title="Time [min]", axis=alt.Axis(format=".1f")),
+            y=alt.Y("source_ph:Q", title="Source vessel pH [-]", axis=alt.Axis(format=".2f")),
+            tooltip=[
+                alt.Tooltip("time_min:Q", title="Time [min]", format=".2f"),
+                alt.Tooltip("source_ph:Q", title="pH [-]", format=".3f"),
+                alt.Tooltip("source_co2_mmol_l:Q", title="CO2* [mmol/L]", format=".4f"),
+            ],
+        )
+        .properties(height=260)
+    )
+    st.altair_chart(ph_chart, width="stretch")
 
     st.markdown("### Flow Sweep")
     st.caption("Single-pass outlet concentration as a function of flow rate.")
@@ -1145,7 +1740,7 @@ def main() -> None:
         )
         .properties(height=280)
     )
-    st.altair_chart(do_chart, use_container_width=True)
+    st.altair_chart(do_chart, width="stretch")
 
     throughput_df = sweep_df.melt(
         id_vars=["flow_ml_min"],
@@ -1163,7 +1758,7 @@ def main() -> None:
         )
         .properties(height=320)
     )
-    st.altair_chart(throughput_chart, use_container_width=True)
+    st.altair_chart(throughput_chart, width="stretch")
 
     sweep_do_values = sweep_df["do_o2_out_percent"].tolist()
     sweep_o2_net_values = sweep_df["o2_net_added_mmol_min"].tolist()
@@ -1215,6 +1810,8 @@ def main() -> None:
     col2.metric("O2 transfer limited", "Yes" if bool(outputs.metadata["o2_transfer_limited"]) else "No")
     col1.metric("O2 outflow [mmol/min]", f"{o2_outlet_rate_mmol_min:.6f}")
     col2.metric("Net O2 added [mmol/min]", f"{o2_added_rate_mmol_min:.6f}")
+    col1.metric("Inlet pH [-]", f"{inlet_ph_value:.3f}")
+    col2.metric("Outlet pH [-]", f"{ph_outlet:.3f}")
 
     st.markdown("### Export")
     excel_available = True
@@ -1255,13 +1852,27 @@ def main() -> None:
             "cstar_n2_mmol_l": float(outputs.cstar_n2_mmol_l),
             "final_c_o2_mmol_l": float(outputs.c_o2_mmol_l[-1]),
             "final_c_n2_mmol_l": float(outputs.c_n2_mmol_l[-1]),
+            "final_c_co2_outlet_mmol_l": float(c_co2_outlet_mmol_l),
             "do_reference_o2_mmol_l": float(do_ref_o2_mmol_l),
             "final_do_o2_percent": float(do_percent[-1]),
+            "final_ph_outlet": float(ph_outlet),
             "o2_outflow_mmol_min": float(o2_outlet_rate_mmol_min),
             "o2_net_added_mmol_min": float(o2_added_rate_mmol_min),
         },
         "pressure_context": pressure_context,
         "source_vessel_timeseries": source_vessel_df.to_dict(orient="records"),
+        "source_vessel_ph_timeseries": ph_series_df.to_dict(orient="records"),
+        "co2_ph_summary": {
+            "inlet_co2_mmol_l": float(inputs.c_co2_init_mmol_l),
+            "co2_after_ph_part_mmol_l": float(c_co2_after_ph_part_mmol_l),
+            "co2_after_do_part_mmol_l": float(c_co2_after_do_part_mmol_l),
+            "co2_outlet_mmol_l": float(c_co2_outlet_mmol_l),
+            "inlet_ph": float(inlet_ph_value),
+            "ph_after_ph_part": float(ph_after_stage1),
+            "ph_after_do_part": float(ph_after_do_part),
+            "ph_outlet": float(ph_outlet),
+            "reverse_ph_do_flow": bool(inputs.reverse_ph_do_flow),
+        },
         "flow_sweep": sweep_df.to_dict(orient="records"),
         "metadata": outputs.metadata,
     }

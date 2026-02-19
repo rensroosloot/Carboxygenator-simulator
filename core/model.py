@@ -16,6 +16,7 @@ def constant_solubility_model(species: str, temperature_c: float) -> float:
     constants = {
         "O2": 0.0128,
         "N2": 0.0061,
+        "CO2": 0.0307,
     }
     if species not in constants:
         raise ValueError(f"Unsupported species: {species}")
@@ -85,6 +86,45 @@ def compute_single_pass_outlet_concentration(
     return cstar_mmol_l + (c_in_mmol_l - cstar_mmol_l) * math.exp(-kla_s_inv * residence_time_s)
 
 
+def compute_two_stage_co2_outlet_concentration(
+    c_co2_in_mmol_l: float,
+    cstar_co2_stage1_mmol_l: float,
+    cstar_co2_stage2_mmol_l: float,
+    kla_co2_s_inv: float,
+    residence_time_stage1_s: float,
+    residence_time_stage2_s: float,
+) -> tuple[float, float]:
+    """Compute CO2 outlet over two serial stages (upstream pH stage, then O2 stage)."""
+
+    c_after_stage1 = compute_single_pass_outlet_concentration(
+        c_in_mmol_l=c_co2_in_mmol_l,
+        cstar_mmol_l=cstar_co2_stage1_mmol_l,
+        kla_s_inv=kla_co2_s_inv,
+        residence_time_s=residence_time_stage1_s,
+    )
+    c_after_stage2 = compute_single_pass_outlet_concentration(
+        c_in_mmol_l=c_after_stage1,
+        cstar_mmol_l=cstar_co2_stage2_mmol_l,
+        kla_s_inv=kla_co2_s_inv,
+        residence_time_s=residence_time_stage2_s,
+    )
+    return c_after_stage1, c_after_stage2
+
+
+def compute_bicarbonate_buffer_ph(
+    hco3_mmol_l: float,
+    c_co2_mmol_l: float,
+    pka_app: float = 6.1,
+) -> float:
+    """Compute pH from bicarbonate buffer using Henderson-Hasselbalch in concentration form."""
+
+    if hco3_mmol_l <= 0.0:
+        raise ValueError("hco3_mmol_l must be > 0 for bicarbonate pH calculation")
+    if c_co2_mmol_l <= 0.0:
+        c_co2_mmol_l = 1e-12
+    return pka_app + math.log10(hco3_mmol_l / c_co2_mmol_l)
+
+
 def compute_effective_kla_from_permeability(
     species: str,
     inputs: SimulationInputs,
@@ -99,6 +139,7 @@ def compute_effective_kla_from_permeability(
     perm = {
         "O2": inputs.perm_o2_mmol_m_per_m2_s_kpa,
         "N2": inputs.perm_n2_mmol_m_per_m2_s_kpa,
+        "CO2": inputs.perm_co2_mmol_m_per_m2_s_kpa,
     }.get(species)
     if perm is None:
         raise ValueError(f"Permeability missing for species: {species}")

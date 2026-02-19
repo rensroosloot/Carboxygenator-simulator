@@ -110,3 +110,27 @@ def test_validate_inputs_rejects_non_positive_total_hold_up_volume() -> None:
     with pytest.raises(ValueError) as exc:
         validate_inputs(invalid)
     assert "total_hold_up_volume_ml must be > 0 when provided" in str(exc.value)
+
+
+def test_validate_inputs_rejects_non_positive_hco3() -> None:
+    inputs = _baseline_inputs()
+    invalid = replace(inputs, hco3_mmol_l=0.0)
+    with pytest.raises(ValueError) as exc:
+        validate_inputs(invalid)
+    assert "hco3_mmol_l must be > 0" in str(exc.value)
+
+
+def test_validate_inputs_rejects_co2_percent_out_of_range() -> None:
+    inputs = _baseline_inputs()
+    invalid = replace(inputs, ph_gas_co2_percent=120.0)
+    with pytest.raises(ValueError) as exc:
+        validate_inputs(invalid)
+    assert "ph_gas_co2_percent must be between 0 and 100" in str(exc.value)
+
+
+def test_validate_inputs_requires_co2_permeability_when_enabled() -> None:
+    inputs = _baseline_inputs()
+    invalid = replace(inputs, co2_transfer_model="permeability", perm_co2_mmol_m_per_m2_s_kpa=None)
+    with pytest.raises(ValueError) as exc:
+        validate_inputs(invalid)
+    assert "perm_co2_mmol_m_per_m2_s_kpa is required for co2_transfer_model='permeability'" in str(exc.value)
